@@ -2,71 +2,74 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <!-- 기본 번들 정보 -->
+  <key>CFBundleDevelopmentRegion</key>
+  <string>$(DEVELOPMENT_LANGUAGE)</string>
+  <key>CFBundleExecutable</key>
+  <string>$(EXECUTABLE_NAME)</string>
+  <key>CFBundleIdentifier</key>
+  <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleName</key>
+  <string>Runner</string>
+  <key>CFBundleDisplayName</key>
+  <string>안전지키미</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>$(MARKETING_VERSION)</string>
+  <key>CFBundleVersion</key>
+  <string>$(CURRENT_PROJECT_VERSION)</string>
+  <key>LSRequiresIPhoneOS</key>
+  <true/>
 
-    <!-- 📍 위치 권한 안내 문구들 -->
-    <key>NSLocationWhenInUseUsageDescription</key>
-    <string>총기 오발사고를 줄이기 위해 현재 위치를 기반으로 엽사 근접 경보를 제공하기 위해 앱 사용 중 위치 정보가 필요합니다.</string>
+  <!-- 스토리보드 / 전체화면 / 상태바 -->
+  <key>UILaunchStoryboardName</key>
+  <string>LaunchScreen</string>
+  <key>UIRequiresFullScreen</key>
+  <true/>
+  <key>UIStatusBarHidden</key>
+  <true/>
+  <key>UIViewControllerBasedStatusBarAppearance</key>
+  <false/>
 
-    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-    <string>앱이 백그라운드에 있을 때도 엽사 근접 경보를 제공하기 위해 항상 위치 정보가 필요합니다.</string>
+  <!-- iPhone만 지원 -->
+  <key>UIDeviceFamily</key>
+  <array>
+    <integer>1</integer>
+  </array>
 
-	<key>NSLocationAlwaysUsageDescription</key>
-    <string>빈번하게 발생하고 있는 일반인 총기 오발 사망사고를 줄이기 위해 엽사 접근 시 경고알림을 위해 백그라운드에서도 위치를 사용합니다. 배터리 소모가 있을 수 있으나 생명을 지키기 위한 필수 기능입니다.</string>
+  <!-- 세로 모드만 -->
+  <key>UISupportedInterfaceOrientations</key>
+  <array>
+    <string>UIInterfaceOrientationPortrait</string>
+  </array>
 
-	<key>NSMicrophoneUsageDescription</key>
-	<string>총기 오발사고 위험경보를 울리기 위해 엽사 접근 시 스피커를 사용합니다.</string>
+  <!-- 백그라운드 동작 모드 -->
+  <key>UIBackgroundModes</key>
+  <array>
+    <string>audio</string>
+    <string>fetch</string>
+    <string>location</string>
+    <string>remote-notification</string>
+  </array>
 
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>audio</string>
-		<string>fetch</string>
-		<string>location</string>
-		<string>processing</string>
-		<string>remote-notification</string>
-	</array>
+  <!-- Privacy: 위치/마이크 설명 -->
+  <key>NSLocationWhenInUseUsageDescription</key>
+  <string>총기 오발사고를 줄이기 위해 현재 위치를 기반으로 엽사 근접 경보를 제공하기 위해 앱 사용 중 위치 정보가 필요합니다.</string>
 
-	<key>CFBundleDevelopmentRegion</key>
-	<string>$(DEVELOPMENT_LANGUAGE)</string>
-	<key>CFBundleDisplayName</key>
-	<string>Safety Ios 2025</string>
-	<key>CFBundleExecutable</key>
-	<string>$(EXECUTABLE_NAME)</string>
-	<key>CFBundleIdentifier</key>
-	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-	<key>CFBundleInfoDictionaryVersion</key>
-	<string>6.0</string>
-	<key>CFBundleName</key>
-	<string>safety_ios_2025</string>
-	<key>CFBundlePackageType</key>
-	<string>APPL</string>
-	<key>CFBundleShortVersionString</key>
-	<string>$(FLUTTER_BUILD_NAME)</string>
-	<key>CFBundleSignature</key>
-	<string>????</string>
-	<key>CFBundleVersion</key>
-	<string>$(FLUTTER_BUILD_NUMBER)</string>
-	<key>LSRequiresIPhoneOS</key>
-	<true/>
-	<key>UILaunchStoryboardName</key>
-	<string>LaunchScreen</string>
-	<key>UIMainStoryboardFile</key>
-	<string>Main</string>
-	<key>UISupportedInterfaceOrientations</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
-	<key>UISupportedInterfaceOrientations~ipad</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationPortraitUpsideDown</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
-	<key>CADisableMinimumFrameDurationOnPhone</key>
-	<true/>
-	<key>UIApplicationSupportsIndirectInputEvents</key>
-	<true/>
+  <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+  <string>앱이 백그라운드에 있을 때도 엽사 근접 경보를 제공하기 위해 항상 위치 정보가 필요합니다.</string>
+
+  <key>NSLocationAlwaysUsageDescription</key>
+  <string>빈번하게 발생하고 있는 일반인 총기 오발 사망사고를 줄이기 위해 엽사 접근 시 경고알림을 위해 백그라운드에서도 위치를 사용합니다. 배터리 소모가 있을 수 있으나 생명을 지키기 위한 필수 기능입니다.</string>
+
+  <key>NSMicrophoneUsageDescription</key>
+  <string>총기 오발사고 위험경보를 울리기 위해 엽사 접근 시 스피커를 사용합니다.</string>
+
+  <!-- 기타 -->
+  <key>UIApplicationSupportsIndirectInputEvents</key>
+  <true/>
 </dict>
 </plist>
