@@ -720,7 +720,7 @@ Future<void> _alertByDistance(int dist) async {
       );
 
       // 삐 소리가 너무 끊기지 않게 약간 기다렸다가 TTS 시작
-      await Future.delayed(const Duration(milliseconds: 400));
+      await Future.delayed(const Duration(milliseconds: 1500));
     } catch (e) {
       debugPrint('❌ beep play error: $e');
     }
