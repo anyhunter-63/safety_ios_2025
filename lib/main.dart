@@ -67,71 +67,77 @@ class SafetyHome extends StatefulWidget {
 }
 
 class _SafetyHomeState extends State<SafetyHome> {
+  String toKoreanPersonCount(int n) {
+    if (n <= 0) return "0명";
 
-String toKoreanPersonCount(int n) {
-  if (n <= 0) return "0명";
+    const unitWords = [
+      "한",
+      "두",
+      "세",
+      "네",
+      "다섯",
+      "여섯",
+      "일곱",
+      "여덟",
+      "아홉"
+    ];
 
-  const unitWords = [
-    "한", "두", "세", "네",
-    "다섯", "여섯", "일곱", "여덟", "아홉"
-  ];
+    const tensWords = [
+      "", // 0
+      "열", // 10
+      "스물", // 20 (← n == 20일 때는 따로 처리)
+      "서른", // 30
+      "마흔", // 40
+      "쉰", // 50
+      "예순", // 60
+      "일흔", // 70
+      "여든", // 80
+      "아흔", // 90
+    ];
 
-  const tensWords = [
-    "",      // 0
-    "열",    // 10
-    "스물",  // 20 (← n == 20일 때는 따로 처리)
-    "서른",  // 30
-    "마흔",  // 40
-    "쉰",    // 50
-    "예순",  // 60
-    "일흔",  // 70
-    "여든",  // 80
-    "아흔",  // 90
-  ];
-
-  // 1 ~ 9
-  if (n < 10) {
-    return "${unitWords[n - 1]} 명"; // 한 명, 두 명, ...
-  }
-
-  // 10 ~ 19 : 열한, 열두, ...
-  if (n < 20) {
-    if (n == 10) return "열 명";
-    final u = n - 10;
-    return "열${unitWords[u - 1]} 명"; // 열한 명, 열두 명 ...
-  }
-
-  // 20 : 스무 명 (예외)
-  if (n == 20) {
-    return "스무 명";
-  }
-
-  // 21 ~ 29 : 스물한, 스물두, ...
-  if (n < 30) {
-    final u = n - 20;
-    return "스물${unitWords[u - 1]} 명"; // 스물한 명, 스물두 명 ...
-  }
-
-  // 30 ~ 99
-  if (n < 100) {
-    final t = n ~/ 10;   // 3,4,5...
-    final u = n % 10;    // 0~9
-
-    final tens = tensWords[t];
-
-    if (u == 0) {
-      // 30, 40, 50... → 서른 명, 마흔 명, 쉰 명...
-      return "$tens 명";
+    // 1 ~ 9
+    if (n < 10) {
+      return "${unitWords[n - 1]} 명"; // 한 명, 두 명, ...
     }
 
-    // 31, 32, ... → 서른한 명, 마흔두 명, 쉰세 명...
-    final unit = unitWords[u - 1];
-    return "$tens$unit 명";
-  }
+    // 10 ~ 19 : 열한, 열두, ...
+    if (n < 20) {
+      if (n == 10) return "열 명";
+      final u = n - 10;
+      return "열${unitWords[u - 1]} 명"; // 열한 명, 열두 명 ...
+    }
 
-  // 100 이상은 그냥 숫자+명
-  return "$n명";
-}
+    // 20 : 스무 명 (예외)
+    if (n == 20) {
+      return "스무 명";
+    }
+
+    // 21 ~ 29 : 스물한, 스물두, ...
+    if (n < 30) {
+      final u = n - 20;
+      return "스물${unitWords[u - 1]} 명"; // 스물한 명, 스물두 명 ...
+    }
+
+    // 30 ~ 99
+    if (n < 100) {
+      final t = n ~/ 10; // 3,4,5...
+      final u = n % 10; // 0~9
+
+      final tens = tensWords[t];
+
+      if (u == 0) {
+        // 30, 40, 50... → 서른 명, 마흔 명, 쉰 명...
+        return "$tens 명";
+      }
+
+      // 31, 32, ... → 서른한 명, 마흔두 명, 쉰세 명...
+      final unit = unitWords[u - 1];
+      return "$tens$unit 명";
+    }
+
+    // 100 이상은 그냥 숫자+명
+    return "$n명";
+  }
 
   double _progress = 0.0;
   Timer? _progressTimer;
@@ -140,7 +146,7 @@ String toKoreanPersonCount(int n) {
   bool _running = false;
 
   Timer? _dangerBlinkTimer;
-  bool _isDangerBlinkOn = true;      // true/false 번갈아가며 깜빡임
+  bool _isDangerBlinkOn = true; // true/false 번갈아가며 깜빡임
 
   String _level = 'SAFE';
   int _distance = -1;
@@ -160,32 +166,32 @@ String toKoreanPersonCount(int n) {
   double? _lastLat;
   double? _lastLng;
 
-void _startDangerBlink() {
-  _dangerBlinkTimer?.cancel(); // 혹시 돌고 있던 거 있으면 정리
-  _isDangerBlinkOn = true;
+  void _startDangerBlink() {
+    _dangerBlinkTimer?.cancel(); // 혹시 돌고 있던 거 있으면 정리
+    _isDangerBlinkOn = true;
 
-  _dangerBlinkTimer = Timer.periodic(
-    const Duration(milliseconds: 600), // 깜빡이는 속도 (원하면 조절)
-    (_) {
-      if (!mounted) return;
-      setState(() {
-        _isDangerBlinkOn = !_isDangerBlinkOn;
-      });
-    },
-  );
-}
-
-void _stopDangerBlink() {
-  _dangerBlinkTimer?.cancel();
-  _dangerBlinkTimer = null;
-
-  // 꺼질 때는 원을 항상 기본색(진한 색)으로
-  if (mounted) {
-    setState(() {
-      _isDangerBlinkOn = true;
-    });
+    _dangerBlinkTimer = Timer.periodic(
+      const Duration(milliseconds: 600), // 깜빡이는 속도 (원하면 조절)
+      (_) {
+        if (!mounted) return;
+        setState(() {
+          _isDangerBlinkOn = !_isDangerBlinkOn;
+        });
+      },
+    );
   }
-}
+
+  void _stopDangerBlink() {
+    _dangerBlinkTimer?.cancel();
+    _dangerBlinkTimer = null;
+
+    // 꺼질 때는 원을 항상 기본색(진한 색)으로
+    if (mounted) {
+      setState(() {
+        _isDangerBlinkOn = true;
+      });
+    }
+  }
 
   @override
   void initState() {
@@ -209,8 +215,8 @@ void _stopDangerBlink() {
   Future<void> _initTts() async {
     try {
       await _tts.setLanguage('ko-KR'); // 한국어
-      await _tts.setSpeechRate(0.5);   // 속도 (0.0 ~ 1.0)
-      await _tts.setPitch(1.0);        // 피치
+      await _tts.setSpeechRate(0.5); // 속도 (0.0 ~ 1.0)
+      await _tts.setPitch(1.0); // 피치
 
       // 🔹 이 줄 추가: speak()가 끝날 때까지 await가 기다리게 설정
       await _tts.awaitSpeakCompletion(true);
@@ -428,13 +434,13 @@ void _stopDangerBlink() {
     // 2️⃣ 지금 돌고 있는 것들부터 전부 끊기 (타이머/애니메이션/스트림)
     _timer?.cancel();
     _progressTimer?.cancel();
-   _stopDangerBlink();
+    _stopDangerBlink();
 
     await _bgLocationSub?.cancel();
     _bgLocationSub = null;
 
     // 3️⃣ 지금 울리고 있는 경보(음성/알람/진동) 모두 즉시 정지
-    await _stopAllAlerts();  // 이 안에서 TTS.stop(), player.stop(), Vibration.cancel()
+    await _stopAllAlerts(); // 이 안에서 TTS.stop(), player.stop(), Vibration.cancel()
 
     // 4️⃣ 스캔 중지 안내 음성 한 번만
     await _speak("스캔을 중지합니다.");
@@ -457,90 +463,90 @@ void _stopDangerBlink() {
     });
   }
 
-Future<void> _processSafety(double lat, double lng) async {
-  try {
-    if (_deviceId.isEmpty) {
-      await _initDeviceId();
-      if (_deviceId.isEmpty) return;
+  Future<void> _processSafety(double lat, double lng) async {
+    try {
+      if (_deviceId.isEmpty) {
+        await _initDeviceId();
+        if (_deviceId.isEmpty) return;
+      }
+
+      final uri =
+          Uri.parse('https://m.kowildlife.com/BIO/civil_safety_ping.php');
+
+      final res = await http.post(uri, body: {
+        'deviceId': _deviceId,
+        'lat': lat.toString(),
+        'lng': lng.toString(),
+      });
+
+      debugPrint('🔎 ping status=${res.statusCode}');
+      debugPrint('🔎 ping body=${res.body}');
+
+      if (res.statusCode != 200) return;
+
+      final body = res.body.trim();
+      final start = body.indexOf('{');
+      final end = body.lastIndexOf('}');
+      if (start == -1 || end == -1 || end <= start) {
+        debugPrint('❌ no JSON object found in body');
+        return;
+      }
+
+      final data = jsonDecode(body.substring(start, end + 1));
+
+      // 거리 파싱
+      final rawDist = data['minDistance'] ?? data['distance'];
+      int dist = -1;
+      if (rawDist is int) dist = rawDist;
+      else if (rawDist is double) dist = rawDist.round();
+      else if (rawDist is String) dist = int.tryParse(rawDist) ?? -1;
+
+      int within150 = _parseIntField(data['within150']);
+      int within200 = _parseIntField(data['within200']);
+      int within500 = _parseIntField(data['within500']);
+
+      // ⛔ 여기서 먼저 _running 확인 (버튼 안 누른 상태면 다 무시)
+      if (!_running) {
+        debugPrint('ℹ️ _processSafety called while not running. ignore.');
+        return;
+      }
+
+      String level = 'SAFE';
+      if (dist >= 0) {
+        if (dist <= 100) level = '위험';
+        else if (dist <= 150) level = '경계';
+        else if (dist <= 200) level = '주의';
+        else if (dist <= 500) level = '관심';
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _level = level;
+        _distance = dist;
+        _nearCount150 = within150;
+        _nearCount200 = within200;
+        _nearCount500 = within500;
+        _lastCheck = DateTime.now();
+      });
+
+      // 혹시 중간에 사용자가 스캔 중지 눌렀으면 여기서도 한 번 더 체크
+      if (!_running) {
+        debugPrint('ℹ️ _processSafety: stopped during update. skip alerts.');
+        return;
+      }
+
+      // 🔴 level 바뀔 때 깜빡이 on/off
+      if (level == '위험') {
+        _startDangerBlink();
+      } else {
+        _stopDangerBlink();
+      }
+
+      await _alertByDistance(dist);
+    } catch (e) {
+      debugPrint('❌ safety check error: $e');
     }
-
-    final uri =
-        Uri.parse('https://m.kowildlife.com/BIO/civil_safety_ping.php');
-
-    final res = await http.post(uri, body: {
-      'deviceId': _deviceId,
-      'lat': lat.toString(),
-      'lng': lng.toString(),
-    });
-
-    debugPrint('🔎 ping status=${res.statusCode}');
-    debugPrint('🔎 ping body=${res.body}');
-
-    if (res.statusCode != 200) return;
-
-    final body = res.body.trim();
-    final start = body.indexOf('{');
-    final end = body.lastIndexOf('}');
-    if (start == -1 || end == -1 || end <= start) {
-      debugPrint('❌ no JSON object found in body');
-      return;
-    }
-
-    final data = jsonDecode(body.substring(start, end + 1));
-
-    // 거리 파싱
-    final rawDist = data['minDistance'] ?? data['distance'];
-    int dist = -1;
-    if (rawDist is int) dist = rawDist;
-    else if (rawDist is double) dist = rawDist.round();
-    else if (rawDist is String) dist = int.tryParse(rawDist) ?? -1;
-
-    int within150 = _parseIntField(data['within150']);
-    int within200 = _parseIntField(data['within200']);
-    int within500 = _parseIntField(data['within500']);
-
-    // ⛔ 여기서 먼저 _running 확인 (버튼 안 누른 상태면 다 무시)
-    if (!_running) {
-      debugPrint('ℹ️ _processSafety called while not running. ignore.');
-      return;
-    }
-
-    String level = 'SAFE';
-    if (dist >= 0) {
-      if (dist <= 100) level = '위험';
-      else if (dist <= 150) level = '경계';
-      else if (dist <= 200) level = '주의';
-      else if (dist <= 500) level = '관심';
-    }
-
-    if (!mounted) return;
-    setState(() {
-      _level = level;
-      _distance = dist;
-      _nearCount150 = within150;
-      _nearCount200 = within200;
-      _nearCount500 = within500;
-      _lastCheck = DateTime.now();
-    });
-
-    // 혹시 중간에 사용자가 스캔 중지 눌렀으면 여기서도 한 번 더 체크
-    if (!_running) {
-      debugPrint('ℹ️ _processSafety: stopped during update. skip alerts.');
-      return;
-    }
-
-    // 🔴 level 바뀔 때 깜빡이 on/off
-    if (level == '위험') {
-      _startDangerBlink();
-    } else {
-      _stopDangerBlink();
-    }
-
-    await _alertByDistance(dist);
-  } catch (e) {
-    debugPrint('❌ safety check error: $e');
   }
-}
 
   // 🔹 스캔 시작 직후 1회: Geolocator로 즉시 위치를 가져와서 바로 체크
   Future<void> _checkSafetyImmediate() async {
@@ -619,44 +625,47 @@ Future<void> _processSafety(double lat, double lng) async {
   // ----------------------------------------------------------
   // 경보
   // ----------------------------------------------------------
-Future<void> _alertByDistance(int dist) async {
-  // 스캔 중이 아니면 어떤 알림도 내지 않음
-  if (!_running) {
-    debugPrint('ℹ️ alertByDistance: not running, skip alert');
-    return;
-  }
+  Future<void> _alertByDistance(int dist) async {
+    // 스캔 중이 아니면 어떤 알림도 내지 않음
+    if (!_running) {
+      debugPrint('ℹ️ alertByDistance: not running, skip alert');
+      return;
+    }
 
-  // dist < 0 이면 아무 것도 안 함
-  if (dist < 0) return;
+    // dist < 0 이면 아무 것도 안 함
+    if (dist < 0) return;
 
-  // 500m 밖 → 안전 안내
-  if (dist > 500) {
-    await _speak("현재 안전구역 오백 미터 안에 엽사가 없습니다.");
-    return;
-  }
+    // 500m 밖 → 안전 안내
+    if (dist > 500) {
+      await _speak("현재 안전구역 오백 미터 안에 엽사가 없습니다.");
+      return;
+    }
 
-  // 150m 이내
-  if (dist <= 150) {
-    await _vibrate(high: true);
-    await _playAlarm();
-    await _speak("현재 백오십 미터 이내에 엽사가 ${toKoreanPersonCount(_nearCount150)} 있습니다. 즉시 주변을 경계하세요.");
-    return;
-  }
+    // 150m 이내
+    if (dist <= 150) {
+      await _vibrate(high: true);
+      await _playAlarm();
+      await _speak(
+          "현재 백오십 미터 이내에 엽사가 ${toKoreanPersonCount(_nearCount150)} 있습니다. 즉시 주변을 경계하세요.");
+      return;
+    }
 
-  // 200m 이내
-  if (dist <= 200) {
-    await _vibrate(high: true);
-    await _speak("현재 이백 미터 이내에 엽사가 ${toKoreanPersonCount(_nearCount200)} 있습니다. 주의하세요.");
-    return;
-  }
+    // 200m 이내
+    if (dist <= 200) {
+      await _vibrate(high: true);
+      await _speak(
+          "현재 이백 미터 이내에 엽사가 ${toKoreanPersonCount(_nearCount200)} 있습니다. 주의하세요.");
+      return;
+    }
 
-  // 500m 이내
-  if (dist <= 500) {
-    await _vibrate(high: false);
-    await _speak("현재 오백 미터 이내에 엽사가 ${toKoreanPersonCount(_nearCount500)} 있습니다.");
-    return;
+    // 500m 이내
+    if (dist <= 500) {
+      await _vibrate(high: false);
+      await _speak(
+          "현재 오백 미터 이내에 엽사가 ${toKoreanPersonCount(_nearCount500)} 있습니다.");
+      return;
+    }
   }
-}
 
   Future<void> _vibrate({required bool high}) async {
     try {
@@ -684,33 +693,66 @@ Future<void> _alertByDistance(int dist) async {
   }
 
   // ----------------------------------------------------------
+  // 뒤로가기 처리 (하단 버튼 + 시스템 뒤로가기 공통)
+  // ----------------------------------------------------------
+  Future<bool> _handleBackPressed() async {
+    if (_running) {
+      // 스캔 중일 때는 종료 막고 안내만
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('종료 안내'),
+          content: const Text(
+            '안전모드(근접경보)가 동작 중입니다.\n\n'
+            '종료를 원하시면 앱 하단의 주변 스캔 중지를 누르세요.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('확인'),
+            ),
+          ],
+        ),
+      );
+      return false; // pop 하지 않음
+    }
+
+    // 스캔 중이 아니면 바로 종료
+    if (Platform.isAndroid) {
+      SystemNavigator.pop();
+    } else if (Platform.isIOS) {
+      exit(0);
+    }
+    return true;
+  }
+
+  // ----------------------------------------------------------
   // UI
   // ----------------------------------------------------------
-Color _levelColorByDistance() {
-  // 500m 넘으면 SAFE (초록)
-  if (_distance < 0 || _distance > 500) {
-    return Colors.green.shade400;
+  Color _levelColorByDistance() {
+    // 500m 넘으면 SAFE (초록)
+    if (_distance < 0 || _distance > 500) {
+      return Colors.green.shade400;
+    }
+
+    // 0 ~ 100m → 위험 (빨강)
+    if (_distance <= 100) {
+      return Colors.red.shade400;
+    }
+
+    // 100 ~ 150m → 경계 (진한 주황빛)
+    if (_distance <= 150) {
+      return Colors.deepOrange.shade400;
+    }
+
+    // 150 ~ 200m → 주의 (노란빛)
+    if (_distance <= 200) {
+      return Colors.orange.shade400;
+    }
+
+    // 200 ~ 500m → 관심 (연노랑)
+    return Colors.yellow.shade600;
   }
-
-  // 0 ~ 100m → 위험 (빨강)
-  if (_distance <= 100) {
-    return Colors.red.shade400;
-  }
-
-  // 100 ~ 150m → 경계 (진한 주황빛)
-  if (_distance <= 150) {
-    return Colors.deepOrange.shade400;
-  }
-
-  // 150 ~ 200m → 주의 (노란빛)
-  if (_distance <= 200) {
-    return Colors.orange.shade400;
-  }
-
-  // 200 ~ 500m → 관심 (연노랑)
-  return Colors.yellow.shade600;
-}
-
 
   Widget _buildRangeMessage() {
     if (_distance < 0) {
@@ -764,114 +806,138 @@ Color _levelColorByDistance() {
 
     final caution = _cautionText();
 
-      // 🔹 원 기본색 (거리 기준)
-      final baseColor = _levelColorByDistance();
+    // 🔹 원 기본색 (거리 기준)
+    final baseColor = _levelColorByDistance();
 
-      // 🔴 "위험"일 때는 깜빡이는 색 적용
-      final Color circleColor;
-      if (_level == '위험') {
-        circleColor = _isDangerBlinkOn
-            ? baseColor                  // 켜진 상태 (진한 빨강 계열)
-            : baseColor.withOpacity(0.2); // 꺼진 상태 (옅은 색)
-      } else {
-        circleColor = baseColor;          // 위험 아니면 그냥 기본색
-      }
+    // 🔴 "위험"일 때는 깜빡이는 색 적용
+    final Color circleColor;
+    if (_level == '위험') {
+      circleColor = _isDangerBlinkOn
+          ? baseColor // 켜진 상태 (진한 빨강 계열)
+          : baseColor.withOpacity(0.2); // 꺼진 상태 (옅은 색)
+    } else {
+      circleColor = baseColor; // 위험 아니면 그냥 기본색
+    }
 
-    return Scaffold(
-      backgroundColor: Colors.grey.shade100,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 2,
-        centerTitle: true,
-        title: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Image.asset(
-              'assets/icon/app_icon_s.png',
-              width: 46,
-              height: 46,
-            ),
-            const SizedBox(width: 8),
-            const Text(
-              '안전지키미',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.w700,
-                color: Colors.black87,
-                letterSpacing: 0.5,
+    return WillPopScope(
+      onWillPop: _handleBackPressed,
+      child: Scaffold(
+        backgroundColor: Colors.grey.shade100,
+        appBar: AppBar(
+          backgroundColor: Colors.white,
+          elevation: 2,
+          centerTitle: true,
+          title: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Image.asset(
+                'assets/icon/app_icon_s.png',
+                width: 46,
+                height: 46,
               ),
-            ),
-          ],
-        ),
-      ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const SizedBox(height: 30),
-            Container(
-              width: 220,
-              height: 220,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: circleColor,
-                boxShadow: [
-                  BoxShadow(
-                    color: circleColor.withOpacity(0.7),
-                    blurRadius: 30,
-                    spreadRadius: 5,
-                  )
-                ],
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                _level,
-                style: const TextStyle(
-                  fontSize: 38,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
-            ),
-            const SizedBox(height: 30),
-            _buildRangeMessage(),
-            const SizedBox(height: 8),
-            if (_running) const ScanProgressBar(),
-            Text(
-              _distanceText(),
-              style: const TextStyle(fontSize: 18),
-            ),
-            const SizedBox(height: 8),
-            if (caution.isNotEmpty)
-              Text(
-                caution,
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            const SizedBox(height: 16),
-            Text("스캔 시각: $last"),
-            const SizedBox(height: 40),
-            ElevatedButton(
-              onPressed: _toggle,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _running ? Colors.green.shade700 : Colors.green,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 60, vertical: 18),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(40),
-                ),
-              ),
-              child: Text(
-                _running ? "주변 스캔 중지" : "주변 스캔 시작",
+              const SizedBox(width: 8),
+              const Text(
+                '안전지키미',
                 style: TextStyle(
-                  fontSize: 22,
-                  color: _running ? Colors.yellow : Colors.white,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.black87,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ],
+          ),
+        ),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const SizedBox(height: 30),
+              Container(
+                width: 220,
+                height: 220,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: circleColor,
+                  boxShadow: [
+                    BoxShadow(
+                      color: circleColor.withOpacity(0.7),
+                      blurRadius: 30,
+                      spreadRadius: 5,
+                    )
+                  ],
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  _level,
+                  style: const TextStyle(
+                    fontSize: 38,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 30),
+              _buildRangeMessage(),
+              const SizedBox(height: 8),
+              if (_running) const ScanProgressBar(),
+              Text(
+                _distanceText(),
+                style: const TextStyle(fontSize: 18),
+              ),
+              const SizedBox(height: 8),
+              if (caution.isNotEmpty)
+                Text(
+                  caution,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              const SizedBox(height: 16),
+              Text("스캔 시각: $last"),
+              const SizedBox(height: 40),
+              ElevatedButton(
+                onPressed: _toggle,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor:
+                      _running ? Colors.green.shade700 : Colors.green,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 60, vertical: 18),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(40),
+                  ),
+                ),
+                child: Text(
+                  _running ? "주변 스캔 중지" : "주변 스캔 시작",
+                  style: TextStyle(
+                    fontSize: 22,
+                    color: _running ? Colors.yellow : Colors.white,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+            ],
+          ),
+        ),
+        bottomNavigationBar: SafeArea(
+          child: Padding(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+            child: SizedBox(
+              height: 48,
+              child: OutlinedButton.icon(
+                onPressed: () async {
+                  await _handleBackPressed();
+                },
+                icon: const Icon(Icons.arrow_back),
+                label: const Text(
+                  '뒤로가기 (종료)',
+                  style: TextStyle(fontSize: 16),
                 ),
               ),
             ),
-          ],
+          ),
         ),
       ),
     );
