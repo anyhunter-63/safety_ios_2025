@@ -10,58 +10,46 @@
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
     <string>앱이 백그라운드에 있을 때도 엽사 근접 경보를 제공하기 위해 항상 위치 정보가 필요합니다.</string>
 
-    <!-- iOS 10 이하 호환용(굳이 안 써도 되지만, 있으면 더 안전) -->
-    <key>NSLocationAlwaysUsageDescription</key>
-    <string>앱이 실행 중이 아니더라도 엽사 근접 경보를 제공하기 위해 위치 정보가 필요합니다.</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+    <string>빈번하게 발생하고 있는 일반인 총기 오발 사망사고를 줄이기 위해 엽사 접근 시 경고알림을 위해 백그라운드에서도 위치를 사용합니다. 배터리 소모가 있을 수 있으나 생명을 지키기 위한 필수 기능입니다.</string>
 
-    <!-- ⏱ 백그라운드 위치 사용 (지속적인 위치 업데이트용) -->
-    <key>UIBackgroundModes</key>
-    <array>
-        <string>location</string>
-    </array>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>총기 오발사고 위험경보를 울리기 위해 엽사 접근 시 스피커를 사용합니다.</string>
 
-	<key>CFBundleDevelopmentRegion</key>
-	<string>$(DEVELOPMENT_LANGUAGE)</string>
-	<key>CFBundleDisplayName</key>
-	<string>Safety Ios 2025</string>
-	<key>CFBundleExecutable</key>
-	<string>$(EXECUTABLE_NAME)</string>
-	<key>CFBundleIdentifier</key>
-	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-	<key>CFBundleInfoDictionaryVersion</key>
-	<string>6.0</string>
-	<key>CFBundleName</key>
-	<string>safety_ios_2025</string>
-	<key>CFBundlePackageType</key>
-	<string>APPL</string>
-	<key>CFBundleShortVersionString</key>
-	<string>$(FLUTTER_BUILD_NAME)</string>
-	<key>CFBundleSignature</key>
-	<string>????</string>
-	<key>CFBundleVersion</key>
-	<string>$(FLUTTER_BUILD_NUMBER)</string>
-	<key>LSRequiresIPhoneOS</key>
-	<true/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+		<string>fetch</string>
+		<string>location</string>
+		<string>processing</string>
+		<string>remote-notification</string>
+	</array>
+
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
 	<string>Main</string>
+
+	<!-- iPhone만 지원 -->
+	<key>UIDeviceFamily</key>
+	<array>
+		<integer>1</integer>
+	</array>
+
+	<!-- iPhone 방향 (필요 시 Landscape 항목 추가 가능) -->
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
-	<key>UISupportedInterfaceOrientations~ipad</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationPortraitUpsideDown</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
-	<key>CADisableMinimumFrameDurationOnPhone</key>
+
+	<!-- iPhone 전체화면(안전) -->
+	<key>UIRequiresFullScreen</key>
 	<true/>
-	<key>UIApplicationSupportsIndirectInputEvents</key>
+
+	<key>UIStatusBarHidden</key>
 	<true/>
+	<key>UIViewControllerBasedStatusBarAppearance</key>
+	<false/>
+
 </dict>
 </plist>
