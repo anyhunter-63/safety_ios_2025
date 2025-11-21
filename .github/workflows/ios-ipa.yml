@@ -1,4 +1,4 @@
-name: iOS IPA Build
+name: "iOS IPA - Safety"
 
 on:
   workflow_dispatch:
@@ -33,14 +33,13 @@ jobs:
     timeout-minutes: 60
 
     env:
-      GOOGLE_SERVICE_INFO_PLIST_BASE64: ${{ secrets.GOOGLE_SERVICE_INFO_PLIST_BASE64 }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       BUNDLE_ID: ${{ secrets.BUNDLE_ID }}
       CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
       KEYCHAIN_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
       KEYCHAIN_NAME: appsign
       P12_PATH: ios_distribution_new.p12
-      PROV_PATH: WildLife_iOS_App_Store.mobileprovision
+	PROV_PATH: Safety_iOS_App_Store.mobileprovision
       COCOAPODS_DISABLE_STATS: "YES"
       EXPORT_METHOD: ${{ github.event.inputs.export_method }}
       # ✅ secrets를 env로 미리 매핑 (if에서 env.*로 검사)
@@ -197,45 +196,6 @@ jobs:
           done
 
           echo "Dependencies OK for webview_flutter."
-
-      - name: Validate Dart dependencies (flutter_inappwebview only)
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -f pubspec.lock || { echo "::error::pubspec.lock missing"; exit 1; }
-
-          echo "== Versions (from pubspec.lock) =="
-          awk '/^ {2}[a-zA-Z0-9_]+:$/ {p=$1} /version:/{print p,$2}' pubspec.lock | sed 's/://'
-
-          get_ver () {
-            local pkg="$1"
-            awk -v pkg="$pkg" '
-              $1 == pkg ":"         { f=1; next }
-              f && $1 == "version:" { gsub(/"/,"",$2); print $2; exit }
-            ' pubspec.lock
-          }
-
-          IAW_VER="$(get_ver flutter_inappwebview || true)"
-          echo "resolved flutter_inappwebview = ${IAW_VER:-<none>}"
-
-          [[ -n "${IAW_VER:-}" ]] || { echo "::error::flutter_inappwebview not resolved"; exit 1; }
-
-          # 혼선 방지: webview_flutter가 잠입해 있으면 실패 처리
-          if grep -q '^  webview_flutter:' pubspec.lock; then
-            echo "::error::webview_flutter detected but project uses flutter_inappwebview. Remove it."
-            exit 1
-          fi
-          if grep -q '^  webview_flutter_wkwebview:' pubspec.lock; then
-            echo "::error::webview_flutter_wkwebview detected but project uses flutter_inappwebview. Remove it."
-            exit 1
-          fi
-
-          # 권장 유틸 존재 여부 알림(없어도 빌드는 가능)
-          for p in url_launcher package_info_plus shared_preferences get_storage geolocator just_audio vibration; do
-            grep -q "^  ${p}:" pubspec.lock || echo "::warning::${p} not found in lock"
-          done
-
-          echo "Dependencies OK for flutter_inappwebview."
 
       - name: Restore pristine Podfile (revert any previous edits)
         shell: bash
