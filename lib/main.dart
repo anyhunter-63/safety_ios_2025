@@ -16,7 +16,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart'; // 이미 있으면 생략
 
-
 void main() {
   runApp(const SafeApp());
 }
