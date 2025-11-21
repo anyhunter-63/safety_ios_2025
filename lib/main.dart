@@ -709,36 +709,63 @@ class _SafetyHomeState extends State<SafetyHome> {
   // ----------------------------------------------------------
   // 뒤로가기 처리 (하단 버튼 + 시스템 뒤로가기 공통)
   // ----------------------------------------------------------
-  Future<bool> _handleBackPressed() async {
-    if (_running) {
-      // 스캔 중일 때는 종료 막고 안내만
-      await showDialog<void>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('종료 안내'),
-          content: const Text(
-            '안전모드(근접경보)가 동작 중입니다.\n\n'
-            '종료를 원하시면 앱 하단의 주변 스캔 중지를 누르세요.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('확인'),
-            ),
-          ],
-        ),
-      );
-      return false; // pop 하지 않음
-    }
+Future<bool> _handleBackPressed() async {
+  if (_running) {
+    if (!mounted) return false;
 
-    // 스캔 중이 아니면 바로 종료
-    if (Platform.isAndroid) {
-      SystemNavigator.pop();
-    } else if (Platform.isIOS) {
-      exit(0);
-    }
-    return true;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.warning_amber_rounded, size: 36, color: Colors.red),
+              const SizedBox(height: 12),
+              const Text(
+                '안전모드 동작 중',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+               '안전모드(근접경보)가 동작 중입니다.\n\n'
+               '종료를 원하시면 앱 하단의 주변 스캔 중지를 누르세요.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('확인'),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    return false; // 여전히 앱은 종료하지 않음
   }
+
+  // 스캔 중이 아니면 바로 종료
+  if (Platform.isAndroid) {
+    SystemNavigator.pop();
+  } else if (Platform.isIOS) {
+    exit(0);
+  }
+  return true;
+}
+
 
   // ----------------------------------------------------------
   // UI
