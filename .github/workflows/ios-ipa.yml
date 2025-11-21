@@ -454,7 +454,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          printf "%s" "${{ secrets.IOS_MOBILEPROVISION_BASE64 }}" | base64 -D > "$PROV_PATH"
+          printf "%s" "${{ secrets.IOS_PROFILE_BASE64 }}" | base64 -D > "$PROV_PATH"
           ls -l "$PROV_PATH"
           file "$PROV_PATH"
           PROV_UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' /dev/stdin <<< "$(security cms -D -i "$PROV_PATH")")
