@@ -1,0 +1,1060 @@
+name: iOS IPA Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      scheme:
+        description: "Xcode Scheme name"
+        required: true
+        default: "Runner"
+      configuration:
+        description: "Build configuration"
+        required: true
+        default: "Release"
+      export_method:
+        description: "Export method (app-store, ad-hoc, development, enterprise)"
+        required: false
+        default: ""
+      proj_path:
+        description: "Path to .xcodeproj (if using project)"
+        required: false
+        default: ""
+      workspace_path:
+        description: "Path to .xcworkspace (if using CocoaPods/Workspace)"
+        required: false
+        default: ""
+
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    env:
+      GOOGLE_SERVICE_INFO_PLIST_BASE64: ${{ secrets.GOOGLE_SERVICE_INFO_PLIST_BASE64 }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      BUNDLE_ID: ${{ secrets.BUNDLE_ID }}
+      CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
+      KEYCHAIN_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
+      KEYCHAIN_NAME: appsign
+      P12_PATH: ios_distribution_new.p12
+      PROV_PATH: WildLife_iOS_App_Store.mobileprovision
+      COCOAPODS_DISABLE_STATS: "YES"
+      EXPORT_METHOD: ${{ github.event.inputs.export_method }}
+      # ✅ secrets를 env로 미리 매핑 (if에서 env.*로 검사)
+      APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+      APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+      APPSTORE_API_KEY_P8: ${{ secrets.APPSTORE_API_KEY_P8 }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure asset directories exist (img, mp3)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p assets/img assets/mp3
+          # 비어 있으면 더미 파일 하나 둠(Flutter는 빈 폴더를 스킵할 수 있음)
+          [[ -f assets/img/.keep ]] || echo "" > assets/img/.keep
+          [[ -f assets/mp3/.keep ]] || echo "" > assets/mp3/.keep
+
+      - name: Select Xcode 16.2 (iOS 18.2 SDK)
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '16.2'
+
+      - name: Lock DEVELOPER_DIR for all next steps
+        shell: bash
+        run: |
+          set -euo pipefail
+          XCD="$(xcode-select -p)"
+          export DEVELOPER_DIR="$XCD"
+          echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
+          unset SDKROOT || true
+          unset SDK_NAME || true
+          unset MD_APPLE_SDK_ROOT || true
+          echo "Locked DEVELOPER_DIR=$DEVELOPER_DIR"
+          xcodebuild -version
+          echo "iphoneos SDK ver: $(xcrun --sdk iphoneos --show-sdk-version)"
+
+      - name: Ensure iOS Platform (SDK 18.2) with retries
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # 0) 현재 Xcode 경로 고정 + 이후 스텝에도 적용
+          DEVDIR="${DEVELOPER_DIR:-$(xcode-select -p)}"
+          echo "Using DEVELOPER_DIR=$DEVDIR"
+          echo "DEVELOPER_DIR=$DEVDIR" >> "$GITHUB_ENV"
+          sudo xcode-select -s "$DEVDIR"
+
+          # 1) 최초 런 (권한/컴포넌트 초기화)
+          sudo xcodebuild -runFirstLaunch || true
+
+          # 2) iOS 플랫폼 다운로드 3회 재시도 (네트워크 흔들릴 때 대비)
+          for i in 1 2 3; do
+            echo "Attempt $i: xcodebuild -downloadPlatform iOS"
+            if sudo xcodebuild -downloadPlatform iOS; then
+              echo "downloadPlatform iOS OK"
+              break
+            fi
+            echo "downloadPlatform iOS failed (try $i) - sleeping 20s..."
+            sleep 20
+          done
+
+          # 3) 경로 및 현황 출력
+          SDKDIR="$DEVDIR/Platforms/iPhoneOS.platform/Developer/SDKs"
+          DSDIR="$DEVDIR/Platforms/iPhoneOS.platform/DeviceSupport"
+          [[ -d "$DEVDIR/Platforms/iPhoneOS.platform" ]] || { echo "::error::iPhoneOS.platform not found under $DEVDIR/Platforms"; exit 1; }
+          echo "== SDKs =="; ls -la "$SDKDIR" || true
+          echo "== DeviceSupport =="; ls -la "$DSDIR" || true
+
+          # 4) 실제 SDK 버전 확인 (핵심)
+          SDK_VER="$(xcrun --sdk iphoneos --show-sdk-version 2>/dev/null || echo '')"
+          echo "iphoneos SDK version reported by xcrun: ${SDK_VER:-<empty>}"
+
+          # 5) 18.2 없으면 한 번 더 시도 (다운로드/리셀렉트)
+          if [[ -z "${SDK_VER}" || "${SDK_VER}" != 18.2* ]]; then
+            echo "::warning::SDK is '${SDK_VER:-N/A}', expected '18.2'. Re-trying platform download once more..."
+            sudo xcodebuild -downloadPlatform iOS || true
+            sudo xcode-select -s "$DEVDIR"
+            SDK_VER="$(xcrun --sdk iphoneos --show-sdk-version 2>/dev/null || echo '')"
+            echo "Recheck SDK version: ${SDK_VER:-<empty>}"
+          fi
+
+          # 6) 최종 검증 - 실패시 즉시 에러 처리
+          if [[ -z "${SDK_VER}" || "${SDK_VER}" != 18.2* ]]; then
+            echo "::error::iPhoneOS SDK 18.2 not available (current='${SDK_VER:-N/A}')."
+            echo "Hint: ensure 'setup-xcode@v1' selected Xcode 16.2, or runner image has Xcode_16.2 installed."
+            exit 1
+          fi
+
+          echo "::notice::iPhoneOS SDK ${SDK_VER} OK"
+
+      - name: Verify Xcode & SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          echo "iphoneos SDK ver: $(xcrun --sdk iphoneos --show-sdk-version)"
+
+      - name: Setup Flutter (3.24.5 stable)
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.5'
+          channel: 'stable'
+
+      - name: Cache pub & cocoapods
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            ios/Pods
+          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+
+      - name: Validate Dart dependencies (webview_flutter only)
+        if: ${{ false }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f pubspec.lock || { echo "::error::pubspec.lock missing"; exit 1; }
+
+          echo "== Versions (from pubspec.lock) =="
+          awk '/^ {2}[a-zA-Z0-9_]+:$/ {p=$1} /version:/{print p,$2}' pubspec.lock | sed 's/://'
+
+          get_ver () {
+            local pkg="$1"
+            awk -v pkg="$pkg" '
+              $1 == pkg ":"         { f=1; next }
+              f && $1 == "version:" { gsub(/"/,"",$2); print $2; exit }
+            ' pubspec.lock
+          }
+
+          WV_VER="$(get_ver webview_flutter || true)"
+          WKV_VER="$(get_ver webview_flutter_wkwebview || true)"
+
+          echo "resolved webview_flutter = ${WV_VER:-<none>}"
+          echo "resolved webview_flutter_wkwebview = ${WKV_VER:-<none>}"
+
+          [[ -n "${WV_VER:-}" ]] || { echo "::error::webview_flutter not resolved"; exit 1; }
+          # iOS 구현 패키지가 잠깐 빠져 있어도 Pod로 대체될 수 있으니 존재하면 버전만 출력
+          # [[ -n "${WKV_VER:-}" ]] || echo "::warning::webview_flutter_wkwebview not pinned in lock (ok if transitive)."
+
+          # 혼선 방지: inappwebview가 잠입해 있으면 실패 처리
+          if grep -q '^  flutter_inappwebview:' pubspec.lock; then
+            echo "::error::flutter_inappwebview detected but project uses webview_flutter. Remove it."
+            exit 1
+          fi
+
+          # 너의 프로젝트에서 필요한 유틸 몇 가지 존재 여부만 확인 (원하면 지워도 됨)
+          for p in url_launcher package_info_plus shared_preferences get_storage geolocator just_audio vibration; do
+            grep -q "^  ${p}:" pubspec.lock || echo "::warning::${p} not found in lock"
+          done
+
+          echo "Dependencies OK for webview_flutter."
+
+      - name: Validate Dart dependencies (flutter_inappwebview only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f pubspec.lock || { echo "::error::pubspec.lock missing"; exit 1; }
+
+          echo "== Versions (from pubspec.lock) =="
+          awk '/^ {2}[a-zA-Z0-9_]+:$/ {p=$1} /version:/{print p,$2}' pubspec.lock | sed 's/://'
+
+          get_ver () {
+            local pkg="$1"
+            awk -v pkg="$pkg" '
+              $1 == pkg ":"         { f=1; next }
+              f && $1 == "version:" { gsub(/"/,"",$2); print $2; exit }
+            ' pubspec.lock
+          }
+
+          IAW_VER="$(get_ver flutter_inappwebview || true)"
+          echo "resolved flutter_inappwebview = ${IAW_VER:-<none>}"
+
+          [[ -n "${IAW_VER:-}" ]] || { echo "::error::flutter_inappwebview not resolved"; exit 1; }
+
+          # 혼선 방지: webview_flutter가 잠입해 있으면 실패 처리
+          if grep -q '^  webview_flutter:' pubspec.lock; then
+            echo "::error::webview_flutter detected but project uses flutter_inappwebview. Remove it."
+            exit 1
+          fi
+          if grep -q '^  webview_flutter_wkwebview:' pubspec.lock; then
+            echo "::error::webview_flutter_wkwebview detected but project uses flutter_inappwebview. Remove it."
+            exit 1
+          fi
+
+          # 권장 유틸 존재 여부 알림(없어도 빌드는 가능)
+          for p in url_launcher package_info_plus shared_preferences get_storage geolocator just_audio vibration; do
+            grep -q "^  ${p}:" pubspec.lock || echo "::warning::${p} not found in lock"
+          done
+
+          echo "Dependencies OK for flutter_inappwebview."
+
+      - name: Restore pristine Podfile (revert any previous edits)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f ios/Podfile ]]; then
+            git checkout -- ios/Podfile || true
+            echo "Restored ios/Podfile from repo"
+          fi
+          sed -n '1,120p' ios/Podfile || true
+
+      - name: Patch Podfile (frameworks + modular headers + iOS 15.0)
+        shell: bash
+        run: |
+          set -euo pipefail
+          f=ios/Podfile
+          [[ -f "$f" ]] || { echo "::error::Podfile missing"; exit 1; }
+
+          # iOS >= 15
+          if grep -q "platform :ios" "$f"; then
+            ruby -e "f=ARGV[0]; s=File.read(f); s=s.gsub(/platform :ios,\s*'[^']*'/, \"platform :ios, '15.0'\"); File.write(f,s)" "$f"
+          else
+            sed -i '' "1s;^;platform :ios, '15.0'\n;" "$f"
+          fi
+
+          # use_frameworks! static & modular headers
+          if grep -q "use_frameworks!" "$f"; then
+            ruby -e "f=ARGV[0]; s=File.read(f); s=s.gsub(/use_frameworks!.*$/, \"use_frameworks! :linkage => :static\"); File.write(f,s)" "$f"
+          else
+            ruby -e "f=ARGV[0]; s=File.read(f); s=s.sub(/target 'Runner' do\n/, \"target 'Runner' do\n  use_frameworks! :linkage => :static\n  use_modular_headers!\n\"); File.write(f,s)" "$f"
+          fi
+          grep -q "use_modular_headers!" "$f" || echo "use_modular_headers!" >> "$f"
+
+          # Force Pods IPHONEOS_DEPLOYMENT_TARGET=15.0
+          if ! grep -q "post_install do" "$f"; then
+          cat >> "$f" <<'RUBY'
+          post_install do |installer|
+            installer.pods_project.targets.each do |t|
+              t.build_configurations.each do |c|
+                c.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
+              end
+            end
+          end
+          RUBY
+          fi
+
+          echo "===== Podfile (head) ====="
+          sed -n '1,160p' "$f" || true
+
+      - name: Clean Flutter & Pods
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter clean
+          rm -rf ios/Pods ios/Podfile.lock
+          rm -rf "$HOME/Library/Caches/CocoaPods" ~/Library/Developer/Xcode/DerivedData || true
+
+      - name: Pod install (fresh, repo update)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '== Pods clean & fresh install =='
+
+          # ✅ 이 시점에 Flutter가 꼭 있어야 함 (위에 있으니 확인)
+          if ! command -v flutter >/dev/null 2>&1; then
+            echo "::error::Flutter CLI가 아직 준비되지 않았습니다. 이 스텝을 Flutter 셋업(예: subosito/flutter-action) 이후로 옮기세요."
+            exit 1
+          fi
+
+          # ✅ Generated.xcconfig 생성 보장 (위치가 위쪽이므로 여기서 실행)
+          flutter pub get
+          [[ -f ios/Flutter/Generated.xcconfig ]] || { 
+            echo "::error::ios/Flutter/Generated.xcconfig 생성 실패 (flutter pub get 직후)."
+            exit 1
+          }
+
+          # ✅ Pods 클린 후 재설치
+          cd ios
+          rm -rf Pods Podfile.lock || true
+          gem install cocoapods-deintegrate --no-document || true
+          pod deintegrate || true
+          pod repo update
+          pod install --repo-update
+          cd ..
+
+      - name: Fix CocoaPods base configs (xcconfig includes)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd ios
+          write_include () {
+            local cfg="$1" lc="" ; case "$cfg" in
+              Debug) lc=debug;; Release) lc=release;; Profile) lc=profile;;
+              *) echo "::error::Unknown config '$cfg'"; exit 1;;
+            esac
+            local xc="Flutter/${cfg}.xcconfig"
+            mkdir -p Flutter
+            [[ -f "$xc" ]] || printf "// Auto-generated by CI\n" > "$xc"
+            if grep -q "Pods-Runner.${lc}.xcconfig" "$xc"; then
+              echo "OK: ${xc} already includes Pods-Runner.${lc}.xcconfig"; return
+            fi
+            tmp="$(mktemp)"
+            {
+              echo '# ===== CI inject: CocoaPods base configuration ====='
+              echo "#include? \"../Pods/Target Support Files/Pods-Runner/Pods-Runner.${lc}.xcconfig\""
+              cat "$xc"
+            } > "$tmp"
+            mv "$tmp" "$xc"
+            echo "Patched: ${xc}"
+          }
+          write_include Debug
+          write_include Release
+          write_include Profile
+          echo "Top of Flutter/Release.xcconfig:"; sed -n '1,5p' Flutter/Release.xcconfig || true
+
+      - name: Bump IPHONEOS_DEPLOYMENT_TARGET in Flutter xcconfigs (15.0)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd ios
+          for cfg in Debug Release Profile; do
+            xc="Flutter/${cfg}.xcconfig"
+            [[ -f "$xc" ]] || printf "// Auto-generated by CI\n" > "$xc"
+            if grep -q "^IPHONEOS_DEPLOYMENT_TARGET" "$xc"; then
+              sed -i '' "s/^IPHONEOS_DEPLOYMENT_TARGET.*/IPHONEOS_DEPLOYMENT_TARGET = 15.0/" "$xc"
+            else
+              printf "\nIPHONEOS_DEPLOYMENT_TARGET = 15.0\n" >> "$xc"
+            fi
+            echo "Patched $xc → IPHONEOS_DEPLOYMENT_TARGET=15.0"
+          done
+
+      - name: Ensure 'Runner' shared scheme exists (no build)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd ios
+
+          PROJ="Runner.xcodeproj"
+          PBX="$PROJ/project.pbxproj"
+          SHARED_DIR="$PROJ/xcshareddata/xcschemes"
+          USER_DIR="$PROJ/xcuserdata"
+          SCHEME="$SHARED_DIR/Runner.xcscheme"
+
+          mkdir -p "$SHARED_DIR"
+
+          # Runner 스킴 존재하면 바로 패스
+          if [[ -f "$SCHEME" ]] && xcodebuild -list -project "$PROJ" 2>/dev/null | sed -n '/Schemes:/,/^$/p' | grep -Eq '^\s*Runner\s*$'; then
+            echo "✅ Runner shared scheme already present: $SCHEME"
+            cd ..
+            exit 0
+          fi
+
+          # 유저 스킴이 있으면 복사
+          USER_SCHEME="$(find "$USER_DIR" -type f -name 'Runner.xcscheme' -print -quit || true)"
+          if [[ -n "${USER_SCHEME:-}" && -f "$USER_SCHEME" ]]; then
+            cp "$USER_SCHEME" "$SCHEME"
+            echo "✅ Copied user scheme to shared: $SCHEME"
+            cd ..
+            exit 0
+          fi
+
+          # PBX에서 Runner 타깃 UUID 추출 (sed만 사용)
+          if [[ ! -f "$PBX" ]]; then
+            echo "::error::$PBX not found"
+            exit 1
+          fi
+          TARGET_ID="$(sed -n '/Begin PBXNativeTarget section/,/End PBXNativeTarget section/ s/^[[:space:]]*\([0-9A-F]\{24\}\) \/\* Runner \*\/ = .*/\1/p' "$PBX" | head -n1)"
+          if [[ -z "${TARGET_ID:-}" ]]; then
+            echo "::error::Could not derive Runner target UUID from $PBX"
+            exit 1
+          fi
+          echo "TARGET_ID=$TARGET_ID"
+
+          # XML을 printf로 생성 (heredoc 없음)
+          {
+            printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>'
+            printf '%s\n' '<Scheme LastUpgradeVersion="1600" version="1.7">'
+            printf '%s\n' '  <BuildAction parallelizeBuildables="YES" buildImplicitDependencies="YES">'
+            printf '%s\n' '    <BuildActionEntries>'
+            printf '%s\n' '      <BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="YES" buildForArchiving="YES" buildForAnalyzing="YES">'
+            printf '%s\n' "        <BuildableReference BuildableIdentifier=\"primary\" BlueprintIdentifier=\"$TARGET_ID\" BuildableName=\"Runner.app\" BlueprintName=\"Runner\" ReferencedContainer=\"container:Runner.xcodeproj\">"
+            printf '%s\n' '        </BuildableReference>'
+            printf '%s\n' '      </BuildActionEntry>'
+            printf '%s\n' '    </BuildActionEntries>'
+            printf '%s\n' '  </BuildAction>'
+            printf '%s\n' '  <TestAction buildConfiguration="Debug"><Testables></Testables></TestAction>'
+            printf '%s\n' '  <LaunchAction buildConfiguration="Debug">'
+            printf '%s\n' '    <BuildableProductRunnable runnableDebuggingMode="0">'
+            printf '%s\n' "      <BuildableReference BuildableIdentifier=\"primary\" BlueprintIdentifier=\"$TARGET_ID\" BuildableName=\"Runner.app\" BlueprintName=\"Runner\" ReferencedContainer=\"container:Runner.xcodeproj\"/>"
+            printf '%s\n' '    </BuildableProductRunnable>'
+            printf '%s\n' '  </LaunchAction>'
+            printf '%s\n' '  <ProfileAction buildConfiguration="Release">'
+            printf '%s\n' '    <BuildableProductRunnable runnableDebuggingMode="0">'
+            printf '%s\n' "      <BuildableReference BuildableIdentifier=\"primary\" BlueprintIdentifier=\"$TARGET_ID\" BuildableName=\"Runner.app\" BlueprintName=\"Runner\" ReferencedContainer=\"container:Runner.xcodeproj\"/>"
+            printf '%s\n' '    </BuildableProductRunnable>'
+            printf '%s\n' '  </ProfileAction>'
+            printf '%s\n' '  <AnalyzeAction buildConfiguration="Debug"/>'
+            printf '%s\n' '  <ArchiveAction buildConfiguration="Release" revealArchiveInOrganizer="YES"/>'
+            printf '%s\n' '</Scheme>'
+          } > "$SCHEME"
+
+          echo "✅ Generated shared Runner scheme: $SCHEME"
+
+          echo "== Schemes (after) =="
+          if [[ -d "Runner.xcworkspace" ]]; then
+            xcodebuild -list -workspace Runner.xcworkspace | sed -n '/Schemes:/,/^$/p' || true
+          else
+            xcodebuild -list -project "$PROJ" | sed -n '/Schemes:/,/^$/p' || true
+          fi
+
+          cd ..
+
+      - name: Prebuild Flutter iOS (fast, config-only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "== Fast prebuild: ensure pub get + config-only (NO full ios build) =="
+
+          # 1) pub get 보장 -> Generated.xcconfig 생성
+          flutter --version
+          flutter pub get
+
+          if [[ ! -f ios/Flutter/Generated.xcconfig ]]; then
+            echo "::error::ios/Flutter/Generated.xcconfig missing after flutter pub get"
+            exit 1
+          fi
+
+          # 2) config-only: Xcode 프로젝트/설정만 생성 (빠름, no codesign, no compile)
+          #    이 명령은 실제 앱 바이너리를 만들지 않으므로 Thin Binary 관련 문제를 예방
+          flutter build ios --no-codesign --config-only
+
+          # 3) (안정성 검사) Runner 스킴이 존재하는지 확인
+          if ! xcodebuild -list -workspace ios/Runner.xcworkspace 2>/dev/null | sed -n '/Schemes:/,/^$/p' | grep -qE '^\s*Runner\s*$'; then
+            echo "::warning::Runner scheme not found after config-only. Will try pod install and recheck."
+            (cd ios && pod install --repo-update) || true
+            xcodebuild -list -workspace ios/Runner.xcworkspace 2>/dev/null | sed -n '/Schemes:/,/^$/p' || true
+          fi
+
+          echo "✅ Prebuild (config-only) done. No full iOS compile executed."
+
+      - name: Decode Apple Distribution .p12
+        shell: bash
+        run: |
+          set -euxo pipefail
+          printf "%s" "${{ secrets.IOS_CERT_P12_B64 }}" | base64 -D > "$P12_PATH"
+          ls -l "$P12_PATH"
+          file "$P12_PATH"
+
+      - name: Verify P12 password (fail fast)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          openssl pkcs12 -in "$P12_PATH" -nokeys -clcerts -passin pass:"${CERT_PASSWORD}" -info -nodes >/dev/null
+
+      - name: Decode Provisioning Profile (.mobileprovision)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          printf "%s" "${{ secrets.IOS_MOBILEPROVISION_BASE64 }}" | base64 -D > "$PROV_PATH"
+          ls -l "$PROV_PATH"
+          file "$PROV_PATH"
+          PROV_UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' /dev/stdin <<< "$(security cms -D -i "$PROV_PATH")")
+          echo "PROV_UUID=$PROV_UUID" >> "$GITHUB_ENV"
+
+      - name: Install signing certificate and provisioning profile (manual signing)
+        shell: bash
+        env:
+          KEYCHAIN_NAME: appsign
+          KEYCHAIN_PWD: ${{ secrets.IOS_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN_NAME="${KEYCHAIN_NAME%.keychain-db}"
+          KEYCHAIN_PATH="$HOME/Library/Keychains/${KEYCHAIN_NAME}.keychain-db"
+          KEYCHAIN_PASSWORD="${KEYCHAIN_PASSWORD:-${KEYCHAIN_PWD:-${CERT_PASSWORD:-actions}}}"
+
+          security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security set-keychain-settings -lut 21600 "${KEYCHAIN_PATH}" || true
+          security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security list-keychains -d user -s "${KEYCHAIN_PATH}" || true
+          security default-keychain -s "${KEYCHAIN_PATH}"
+
+          security import "${P12_PATH}" -k "${KEYCHAIN_PATH}" -P "${CERT_PASSWORD}" -T /usr/bin/codesign -T /usr/bin/security -A || {
+            echo "::warning::P12 direct import failed; try repack"
+            tmpdir="$(mktemp -d)"; trap 'rm -rf "$tmpdir"' EXIT
+            openssl pkcs12 -in "${P12_PATH}" -passin pass:"${CERT_PASSWORD}" -nocerts -nodes -out "${tmpdir}/key.pem"
+            openssl pkcs12 -in "${P12_PATH}" -passin pass:"${CERT_PASSWORD}" -clcerts -nokeys -out "${tmpdir}/cert.pem"
+            openssl pkcs12 -export -inkey "${tmpdir}/key.pem" -in "${tmpdir}/cert.pem" -out "${tmpdir}/repacked.p12" -passout pass:"${KEYCHAIN_PASSWORD}"
+            security import "${tmpdir}/repacked.p12" -k "${KEYCHAIN_PATH}" -P "${KEYCHAIN_PASSWORD}" -T /usr/bin/codesign -T /usr/bin/security -A
+          }
+
+          security set-key-partition-list -S apple-tool:,apple: -s -k "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+
+          mkdir -p "${HOME}/Library/MobileDevice/Provisioning Profiles"
+          PROV_XML="$(security cms -D -i "${PROV_PATH}")"
+          PROV_UUID="$(/usr/libexec/PlistBuddy -c 'Print:UUID' /dev/stdin <<<"${PROV_XML}")"
+          cp "${PROV_PATH}" "${HOME}/Library/MobileDevice/Provisioning Profiles/${PROV_UUID}.mobileprovision"
+
+          echo "== identities in ${KEYCHAIN_PATH} =="
+          security find-identity -p codesigning -v "${KEYCHAIN_PATH}" || true
+
+          echo "KEYCHAIN_NAME=${KEYCHAIN_NAME}"   >> "$GITHUB_ENV"
+          echo "KEYCHAIN_PATH=${KEYCHAIN_PATH}"   >> "$GITHUB_ENV"
+          echo "KEYCHAIN_PASSWORD=${KEYCHAIN_PASSWORD}" >> "$GITHUB_ENV"
+
+      - name: Activate signing keychain globally (for Flutter/xcodebuild)
+        shell: bash
+        env:
+          KEYCHAIN_PATH: ${{ env.KEYCHAIN_PATH }}
+          KEYCHAIN_PASSWORD: ${{ env.KEYCHAIN_PASSWORD }}
+          KEYCHAIN_NAME: ${{ env.KEYCHAIN_NAME }}
+          CERT_PASSWORD: ${{ env.CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN_NAME="${KEYCHAIN_NAME:-appsign}"
+          KEYCHAIN_PATH="${KEYCHAIN_PATH:-$HOME/Library/Keychains/${KEYCHAIN_NAME}.keychain-db}"
+          KEYCHAIN_PASSWORD="${KEYCHAIN_PASSWORD:-${CERT_PASSWORD:-actions}}"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" || true
+          security default-keychain -s "$KEYCHAIN_PATH" || true
+          security list-keychains -d user -s "$KEYCHAIN_PATH" "$HOME/Library/Keychains/login.keychain-db" "/Library/Keychains/System.keychain" || true
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" || true
+          security find-identity -p codesigning -v "$KEYCHAIN_PATH" || true
+
+      - name: Read provisioning profile name to GITHUB_ENV
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f "${PROV_PATH}" ]]; then
+            echo "::error::Provisioning profile not found at ${PROV_PATH}"
+            exit 1
+          fi
+          TMP_PLIST="$(mktemp)"
+          /usr/bin/security cms -D -i "${PROV_PATH}" > "${TMP_PLIST}"
+          PROV_NAME="$(/usr/libexec/PlistBuddy -c 'Print :Name' "${TMP_PLIST}")" || PROV_NAME=""
+          PROV_UUID_ACTUAL="$(/usr/libexec/PlistBuddy -c 'Print :UUID' "${TMP_PLIST}")" || PROV_UUID_ACTUAL=""
+          echo "PROV_NAME=${PROV_NAME}" >> "${GITHUB_ENV}"
+          echo "PROV_UUID_ACTUAL=${PROV_UUID_ACTUAL}" >> "${GITHUB_ENV}"
+          echo "Detected provision: name='${PROV_NAME}', uuid='${PROV_UUID_ACTUAL}'"
+
+      - name: Create ExportOptions.plist (manual signing; method dynamic)
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${BUNDLE_ID:?BUNDLE_ID missing}"
+          : "${APPLE_TEAM_ID:?APPLE_TEAM_ID missing}"
+          : "${PROV_NAME:?PROV_NAME missing}"
+
+          METHOD="${EXPORT_METHOD:-app-store}"
+
+          EXPORT_PLIST="${RUNNER_TEMP}/ExportOptions.plist"
+          cat > "${EXPORT_PLIST}" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>compileBitcode</key><false/>
+            <key>destination</key><string>export</string>
+            <key>method</key><string>${METHOD}</string>
+            <key>signingStyle</key><string>manual</string>
+            <key>teamID</key><string>${APPLE_TEAM_ID}</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>${BUNDLE_ID}</key><string>${PROV_NAME}</string>
+            </dict>
+            <key>signingCertificate</key><string>${SIGNING_CERT_CLASS:-Apple Distribution}</string>
+            <key>stripSwiftSymbols</key><true/>
+            <key>uploadSymbols</key><true/>
+            <key>generateAppStoreInformation</key><false/>
+          </dict>
+          </plist>
+          PLIST
+          echo "EXPORT_PLIST=${EXPORT_PLIST}" >> "$GITHUB_ENV"
+          /usr/libexec/PlistBuddy -c 'Print' "${EXPORT_PLIST}" >/dev/null
+
+      - name: Unset XCODE_XCCONFIG_FILE (keep CocoaPods env)
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset XCODE_XCCONFIG_FILE || true
+          echo "XCODE_XCCONFIG_FILE cleared."
+
+      - name: Verify signing identity before archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${KEYCHAIN_PATH:?missing}"
+          : "${KEYCHAIN_PASSWORD:?missing}"
+          security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security default-keychain -s "${KEYCHAIN_PATH}"
+          security list-keychains -d user -s "${KEYCHAIN_PATH}"
+          echo "== Available code signing identities =="
+          security find-identity -p codesigning -v "${KEYCHAIN_PATH}" || true
+          LINE="$(security find-identity -p codesigning -v "${KEYCHAIN_PATH}" | grep -E '\"(Apple|iPhone) Distribution' | head -n1 || true)"
+          if [[ -z "${LINE}" ]]; then
+            echo "::error::No Distribution identity (Apple/iPhone) found in ${KEYCHAIN_PATH}"
+            exit 1
+          fi
+          SIGNING_IDENTITY="$(printf "%s\n" "${LINE}" | sed -E 's/.*\"(.*)\".*/\1/')"
+          SIGNING_CERT_CLASS="$(printf "%s\n" "${SIGNING_IDENTITY}" | sed -E 's/:.*$//' | xargs)"
+          echo "Using signing identity: ${SIGNING_IDENTITY}"
+          echo "Class: ${SIGNING_CERT_CLASS}"
+          {
+            echo "SIGNING_IDENTITY=${SIGNING_IDENTITY}"
+            echo "SIGNING_CERT_CLASS=${SIGNING_CERT_CLASS}"
+          } >> "$GITHUB_ENV"
+
+      - name: Extract version info from pubspec.yaml
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f pubspec.yaml || { echo "::error::pubspec.yaml missing"; exit 1; }
+
+          # pubspec.yaml의 version: x.y.z+n 형태 읽기
+          VER_LINE="$(grep -E '^[[:space:]]*version:' pubspec.yaml | head -n1 | sed 's/#.*$//')"
+          BASE_VERSION="$(printf '%s\n' "$VER_LINE" | awk -F'[ :+]+' '{print $2}')"
+          CUR_BN_RAW="$(printf '%s\n' "$VER_LINE" | awk -F'[ :+]+' '{print $3}')"
+
+          # 기본값 방어
+          [[ -n "${BASE_VERSION:-}" ]] || BASE_VERSION="1.0.0"
+          [[ "${CUR_BN_RAW:-}" =~ ^[0-9]+$ ]] && CUR_BN="$CUR_BN_RAW" || CUR_BN=0
+
+          # 자동 +1 (필요 없으면 NEXT_BN=$CUR_BN 으로 바꿔도 됨)
+          #NEXT_BN=$(( CUR_BN + 1 ))
+          NEXT_BN=$CUR_BN
+
+          echo "Detected version: ${BASE_VERSION}+${NEXT_BN}"
+          echo "BASE_VERSION=${BASE_VERSION}" >> "$GITHUB_ENV"
+          echo "NEXT_BN=${NEXT_BN}" >> "$GITHUB_ENV"
+
+      - name: Ensure version keys in ios/Runner/Info.plist (source)
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${BASE_VERSION:?BASE_VERSION missing}"; : "${NEXT_BN:?NEXT_BN missing}"
+          PLIST="ios/Runner/Info.plist"
+          test -f "$PLIST" || { echo "::error::$PLIST not found"; exit 1; }
+
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST" >/dev/null 2>&1 \
+            || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string ${BASE_VERSION}" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${BASE_VERSION}" "$PLIST" || true
+
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST" >/dev/null 2>&1 \
+            || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string ${NEXT_BN}" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${NEXT_BN}" "$PLIST" || true
+
+          echo "After patch:"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST" || true
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST" || true
+
+      - name: Guard no flutter_foreground_task header in bridging header
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -Rni 'FlutterForegroundTaskPlugin.h' ios/Runner/Runner-Bridging-Header.h; then
+            echo "::error::Remove flutter_foreground_task import from Runner-Bridging-Header.h"
+            exit 1
+          fi
+
+      - name: Force aps=production in Runner.entitlements (no variable)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > ios/Runner/Runner.entitlements <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>aps-environment</key>
+              <string>production</string>
+          </dict>
+          </plist>
+          PLIST
+          plutil -p ios/Runner/Runner.entitlements
+
+      - name: Sanity check provisioning profile (exists & matches bundle)
+        shell: bash
+        env:
+          PROV_UUID_ACTUAL: ${{ env.PROV_UUID_ACTUAL }}
+          BUNDLE_ID:        ${{ env.BUNDLE_ID }}
+        run: |
+          set -euo pipefail
+          PP="${HOME}/Library/MobileDevice/Provisioning Profiles/${PROV_UUID_ACTUAL}.mobileprovision"
+          test -f "$PP" || { echo "::error::Provisioning profile not found: $PP"; exit 2; }
+          TMP="$(mktemp)"; security cms -D -i "$PP" > "$TMP"
+          NAME=$(/usr/libexec/PlistBuddy -c 'Print :Name' "$TMP")
+          APPID=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$TMP")
+          TEAMID="${APPID%%.*}"; BID="${APPID#*.}"
+          echo "Profile Name: $NAME"
+          echo "TeamID: $TEAMID"
+          echo "AppID (bundle): $BID"
+          if [ "$BID" != "$BUNDLE_ID" ]; then
+            echo "::error::Provisioning profile bundle id mismatch: want $BUNDLE_ID, got $BID"
+            exit 2
+          fi
+          rm -f "$TMP"
+
+      - name: Build & Archive (iphoneos, manual signing, use found identity)
+        shell: bash
+        env:
+          APPLE_TEAM_ID:     ${{ env.APPLE_TEAM_ID }}
+          BUNDLE_ID:         ${{ env.BUNDLE_ID }}
+          KEYCHAIN_PATH:     ${{ env.KEYCHAIN_PATH }}
+          KEYCHAIN_PASSWORD: ${{ env.KEYCHAIN_PASSWORD }}
+          PROV_NAME:         ${{ env.PROV_NAME }}
+          PROV_UUID_ACTUAL:  ${{ env.PROV_UUID_ACTUAL }}
+          BASE_VERSION:      ${{ env.BASE_VERSION }}
+          NEXT_BN:           ${{ env.NEXT_BN }}
+          SIGNING_IDENTITY:  ${{ env.SIGNING_IDENTITY }}  # ← 위 검증 스텝에서 얻은 값 그대로 사용
+        run: |
+          set -euo pipefail
+          : "${APPLE_TEAM_ID:?}"; : "${BUNDLE_ID:?}"; : "${PROV_NAME:?}"; : "${PROV_UUID_ACTUAL:?}"
+          : "${KEYCHAIN_PATH:?}"; : "${KEYCHAIN_PASSWORD:?}"; : "${SIGNING_IDENTITY:?}"
+
+          security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security default-keychain -s "${KEYCHAIN_PATH}"
+          security list-keychains -d user -s "${KEYCHAIN_PATH}"
+
+          export SDKROOT=iphoneos
+          ARCHIVE_PATH="$RUNNER_TEMP/Runner.xcarchive"
+          RESULT_BUNDLE="$RUNNER_TEMP/ArchiveResult.xcresult"
+          DERIVED="$RUNNER_TEMP/DerivedData_Archive"
+          rm -rf "$ARCHIVE_PATH" "$RESULT_BUNDLE" "$DERIVED"
+
+          echo "Using DEVELOPER_DIR=${DEVELOPER_DIR:-$(xcode-select -p)}"
+          xcodebuild -version || true
+
+          xcodebuild \
+            -workspace ios/Runner.xcworkspace \
+            -scheme "${{ github.event.inputs.scheme || 'Runner' }}" \
+            -configuration "${{ github.event.inputs.configuration || 'Release' }}" \
+            -archivePath "$ARCHIVE_PATH" \
+            -resultBundlePath "$RESULT_BUNDLE" \
+            -derivedDataPath "$DERIVED" \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            archive \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM="${APPLE_TEAM_ID}" \
+            "PRODUCT_BUNDLE_IDENTIFIER=${BUNDLE_ID}" \
+            "Runner:PRODUCT_BUNDLE_IDENTIFIER=${BUNDLE_ID}" \
+            "CODE_SIGN_IDENTITY=${SIGNING_IDENTITY}" \
+            "Runner:CODE_SIGN_IDENTITY=${SIGNING_IDENTITY}" \
+            "PROVISIONING_PROFILE_SPECIFIER=${PROV_NAME}" \
+            "Runner:PROVISIONING_PROFILE_SPECIFIER=${PROV_NAME}" \
+            "PROVISIONING_PROFILE=${PROV_UUID_ACTUAL}" \
+            "Runner:PROVISIONING_PROFILE=${PROV_UUID_ACTUAL}" \
+            CODE_SIGNING_ALLOWED=YES \
+            "CODE_SIGNING_ALLOWED[sdk=iphoneos*]=YES" \
+            CODE_SIGNING_REQUIRED=YES \
+            SUPPORTS_MACCATALYST=NO \
+            DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER=NO \
+            SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD=NO \
+            SUPPORTED_PLATFORMS=iphoneos \
+            ENABLE_BITCODE=NO \
+            ONLY_ACTIVE_ARCH=NO \
+            VALIDATE_WORKSPACE=YES \
+            SWIFT_VERSION=5.0 \
+            "Runner:MARKETING_VERSION=${BASE_VERSION}" \
+            "Runner:CURRENT_PROJECT_VERSION=${NEXT_BN}" \
+            "CODE_SIGN_ENTITLEMENTS=Runner/Runner.entitlements" \
+            "Runner:CODE_SIGN_ENTITLEMENTS=Runner/Runner.entitlements" \
+            'OTHER_CODE_SIGN_FLAGS=$(inherited) --keychain ${KEYCHAIN_PATH} --entitlements Runner/Runner.entitlements' \
+            CODE_SIGN_INJECT_BASE_ENTITLEMENTS=YES
+
+          # iphoneos 대상 확인
+          APP_PLIST="$ARCHIVE_PATH/Products/Applications/Runner.app/Info.plist"
+          if [ -f "$APP_PLIST" ]; then
+            PNAME=$(/usr/libexec/PlistBuddy -c 'Print :DTPlatformName' "$APP_PLIST" 2>/dev/null || echo "")
+            echo "DTPlatformName=${PNAME:-<none>}"
+            if [ "${PNAME:-}" != "iphoneos" ]; then
+              echo "::error::Not an iPhoneOS archive (DTPlatformName=${PNAME:-<none>})"
+              exit 2
+            fi
+          fi
+
+          echo "ARCHIVE_PATH=$ARCHIVE_PATH" >> "$GITHUB_ENV"
+
+      - name: Force-embed profile & sign app (post-archive hotfix)
+        shell: bash
+        env:
+          ARCHIVE_PATH:      ${{ env.ARCHIVE_PATH }}
+          PROV_UUID_ACTUAL:  ${{ env.PROV_UUID_ACTUAL }}
+          SIGNING_IDENTITY:  ${{ env.SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          : "${ARCHIVE_PATH:?}"; : "${PROV_UUID_ACTUAL:?}"; : "${SIGNING_IDENTITY:?}"
+
+          APP_PATH="${ARCHIVE_PATH}/Products/Applications/Runner.app"
+          PP="$HOME/Library/MobileDevice/Provisioning Profiles/${PROV_UUID_ACTUAL}.mobileprovision"
+
+          test -d "$APP_PATH" || { echo "::error::Runner.app not found at $APP_PATH"; exit 1; }
+          test -f "$PP"      || { echo "::error::Provisioning profile not found: $PP"; exit 2; }
+
+          echo "== Embed provisioning profile into app =="
+          cp -f "$PP" "$APP_PATH/embedded.mobileprovision"
+
+          echo "== Re-sign inner frameworks/appex/dylibs =="
+          find "$APP_PATH" -type d \( -name "*.framework" -o -name "*.appex" \) -print0 | while IFS= read -r -d '' d; do
+            /usr/bin/codesign --force --sign "$SIGNING_IDENTITY" --options runtime --timestamp "$d"
+          done
+          find "$APP_PATH" -type f \( -name "*.dylib" -o -name "*.so" \) -print0 | while IFS= read -r -d '' f; do
+            /usr/bin/codesign --force --sign "$SIGNING_IDENTITY" --options runtime --timestamp "$f"
+          done
+
+          echo "== Re-sign the .app with final entitlements =="
+          ENT="ios/Runner/Runner.entitlements"
+          test -f "$ENT" || { echo "::error::Entitlements not found: $ENT"; exit 2; }
+          /usr/bin/codesign --force --sign "$SIGNING_IDENTITY" --options runtime --timestamp --entitlements "$ENT" --deep "$APP_PATH"
+
+          echo "== Verify codesign (should be valid) =="
+          /usr/bin/codesign --verify --verbose=4 "$APP_PATH"
+          /usr/bin/codesign -d --entitlements :- "$APP_PATH" 2>/dev/null | plutil -p - || true
+
+      - name: Inspect signed app (embedded.mobileprovision & entitlements)
+        shell: bash
+        env:
+          ARCHIVE_PATH: ${{ env.ARCHIVE_PATH }}
+          KEYCHAIN_PATH: ${{ env.KEYCHAIN_PATH }}
+        run: |
+          set -euo pipefail
+          APP_PATH="${ARCHIVE_PATH:-$RUNNER_TEMP/Runner.xcarchive}/Products/Applications/Runner.app"
+          test -d "$APP_PATH" || { echo "::error::Runner.app not found at $APP_PATH"; exit 1; }
+
+          if [ ! -f "$APP_PATH/embedded.mobileprovision" ]; then
+            echo "::error::embedded.mobileprovision missing in app"
+            echo "== codesign identity in keychain =="
+            /usr/bin/security find-identity -v -p codesigning "${KEYCHAIN_PATH:-$HOME/Library/Keychains/appsign.keychain-db}" || true
+            echo "== codesign -dv (for hints) =="
+            codesign -dv --verbose=4 "$APP_PATH" 2>&1 || true
+            exit 2
+          fi
+
+          echo "== embedded.mobileprovision: Name =="
+          TMP_PL="$(mktemp)"
+          /usr/bin/security cms -D -i "$APP_PATH/embedded.mobileprovision" > "$TMP_PL" || { echo "::error::security cms decode failed"; exit 2; }
+          /usr/libexec/PlistBuddy -c 'Print :Name' "$TMP_PL" || true
+          # 원하면 추가 정보
+          /usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$TMP_PL" || true
+          /usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$TMP_PL" || true
+          rm -f "$TMP_PL"
+
+          echo "== codesign entitlements (final) =="
+          codesign -d --entitlements :- "$APP_PATH" > /tmp/final.plist 2>/dev/null || { echo "::error::codesign dump failed"; exit 2; }
+          /usr/libexec/PlistBuddy -c 'Print' /tmp/final.plist || true
+          ACTUAL_APS=$(/usr/libexec/PlistBuddy -c 'Print :aps-environment' /tmp/final.plist 2>/dev/null || echo "")
+          echo "aps-environment(actual)=${ACTUAL_APS:-<none>}"
+
+      - name: Show effective build settings (signing & entitlements)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # -json은 경고 출력이 앞에 끼면 파싱이 깨진다 → 일반 텍스트로 안전 출력
+          xcodebuild -showBuildSettings \
+            -workspace ios/Runner.xcworkspace \
+            -scheme "${{ github.event.inputs.scheme || 'Runner' }}" \
+            -configuration "${{ github.event.inputs.configuration || 'Release' }}" \
+            -sdk iphoneos 2>/dev/null \
+          | awk -F' = ' '
+              $1 ~ /(^|\s)(CODE_SIGN_IDENTITY|DEVELOPMENT_TEAM|PRODUCT_BUNDLE_IDENTIFIER|CODE_SIGN_ENTITLEMENTS|SUPPORTED_PLATFORMS)$/ {
+                gsub(/^[[:space:]]+|[[:space:]]+$/,"",$1);
+                print $1 " = " $2
+              }'
+
+      - name: Guard aps-environment vs export method (fail fast)
+        shell: bash
+        env:
+          EXPORT_METHOD: ${{ env.EXPORT_METHOD }}
+          ARCHIVE_PATH:  ${{ env.ARCHIVE_PATH }}
+        run: |
+          set -euo pipefail
+          APP_PATH="${ARCHIVE_PATH:-$RUNNER_TEMP/Runner.xcarchive}/Products/Applications/Runner.app"
+          [[ -d "${APP_PATH}" ]] || { echo "::error::Runner.app not found"; exit 1; }
+
+          WANT="production"
+          case "${EXPORT_METHOD:-app-store}" in
+            development) WANT="development" ;;
+            app-store|app-store-connect|ad-hoc|enterprise|"") WANT="production" ;;
+          esac
+
+          APS="$(codesign -d --entitlements :- "${APP_PATH}" 2>/dev/null | plutil -extract aps-environment raw - -o - 2>/dev/null || true)"
+          echo "aps-environment(actual)=${APS:-<none>}, expected=${WANT} (method=${EXPORT_METHOD:-app-store})"
+          [[ -n "${APS:-}" ]] || { echo "::error::entitlements missing from signed app"; exit 2; }
+          [[ "${APS}" == "${WANT}" ]] || { echo "::error::aps-environment mismatch"; exit 2; }
+
+      - name: Dump entitlements / identifiers (APNs, BG modes)
+        shell: bash
+        env:
+          ARCHIVE_PATH: ${{ env.ARCHIVE_PATH }}
+        run: |
+          set -euo pipefail
+          APP_PATH="${ARCHIVE_PATH:-$RUNNER_TEMP/Runner.xcarchive}/Products/Applications/Runner.app"
+          test -d "${APP_PATH}" || { echo "::error::Runner.app not found"; exit 1; }
+
+          echo "=== CFBundleIdentifier ==="
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${APP_PATH}/Info.plist" || true
+
+          echo "=== Embedded entitlements ==="
+          codesign -d --entitlements :- "${APP_PATH}" 2>/dev/null | plutil -p - || true
+
+          echo "=== UIBackgroundModes ==="
+          /usr/libexec/PlistBuddy -c 'Print :UIBackgroundModes' "${APP_PATH}/Info.plist" || true
+
+          echo "=== Quick checks ==="
+          APP_ID_LINE="$(codesign -d --entitlements :- "${APP_PATH}" 2>/dev/null | plutil -extract application-identifier raw - -o - 2>/dev/null || true)"
+          APS_ENV="$(codesign -d --entitlements :- "${APP_PATH}" 2>/dev/null | plutil -extract aps-environment raw - -o - 2>/dev/null || true)"
+          echo "application-identifier => ${APP_ID_LINE}"
+          echo "aps-environment       => ${APS_ENV}"
+
+      - name: Export IPA (xcodebuild -exportArchive)
+        shell: bash
+        env:
+          EXPORT_PLIST: ${{ env.EXPORT_PLIST }}
+        run: |
+          set -euo pipefail
+          : "${EXPORT_PLIST:?}"
+          ARCHIVE_PATH="$RUNNER_TEMP/Runner.xcarchive"
+          IPA_DIR="$RUNNER_TEMP/ipa_out"
+          rm -rf "$IPA_DIR"; mkdir -p "$IPA_DIR"
+
+          # Xcode 16.2 경고 대응: app-store → app-store-connect
+          /usr/libexec/PlistBuddy -c "Set :method app-store-connect" "$EXPORT_PLIST" || true
+
+          xcodebuild -exportArchive \
+            -archivePath "$ARCHIVE_PATH" \
+            -exportOptionsPlist "$EXPORT_PLIST" \
+            -exportPath "$IPA_DIR" \
+            | xcpretty || true
+
+          echo "== Exported files =="
+          ls -la "$IPA_DIR" || true
+
+          # 어떤 이름이든 첫 번째 .ipa를 채택
+          IPA_FOUND="$(ls -1 "$IPA_DIR"/*.ipa 2>/dev/null | head -n1 || true)"
+          if [[ -z "${IPA_FOUND:-}" || ! -f "$IPA_FOUND" ]]; then
+            echo "::error::No .ipa found under $IPA_DIR"
+            exit 2
+          fi
+
+          echo "IPA_PATH=$IPA_FOUND" >> "$GITHUB_ENV"
+          echo "IPA file: $IPA_FOUND"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ipa
+          path: ${{ env.IPA_PATH }}
+          if-no-files-found: error
+          compression-level: 6
+          overwrite: false
+          include-hidden-files: false
+
+      - name: Check ASC secrets presence (safe)
+        shell: bash
+        env:
+          KEY_ID:     ${{ secrets.APPSTORE_KEY_ID }}
+          ISSUER_ID:  ${{ secrets.APPSTORE_ISSUER_ID }}
+          KEY_P8:     ${{ secrets.APPSTORE_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          test -n "${KEY_ID:-}"    || { echo "::error::APPSTORE_KEY_ID missing"; exit 1; }
+          test -n "${ISSUER_ID:-}" || { echo "::error::APPSTORE_ISSUER_ID missing"; exit 1; }
+          test -n "${KEY_P8:-}"    || { echo "::error::APPSTORE_API_KEY_P8 missing"; exit 1; }
+          echo "APPSTORE_KEY_ID length: ${#KEY_ID}"
+          echo "APPSTORE_ISSUER_ID looks like UUID (len=${#ISSUER_ID})"
+          echo "APPSTORE_API_KEY_P8 length: ${#KEY_P8}"
+
+      - name: Create App Store Connect API Key JSON
+        shell: bash
+        env:
+          KEY_ID:     ${{ secrets.APPSTORE_KEY_ID }}
+          ISSUER_ID:  ${{ secrets.APPSTORE_ISSUER_ID }}
+          KEY_P8:     ${{ secrets.APPSTORE_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          JSON_PATH="$RUNNER_TEMP/appstore_api_key.json"
+          python3 - << 'PY'
+          import os, base64, json, pathlib, textwrap
+          kid=os.environ['KEY_ID'].strip()
+          iss=os.environ['ISSUER_ID'].strip()
+          raw=os.environ['KEY_P8'].strip().replace('\\n','\n')
+          def wrap64(b):
+              b=''.join(b.split())
+              return "-----BEGIN PRIVATE KEY-----\n" + '\n'.join(textwrap.wrap(b,64)) + "\n-----END PRIVATE KEY-----"
+          pem=raw
+          if "PRIVATE KEY" not in raw:
+              try:
+                  dec=base64.b64decode(raw).decode('utf-8','ignore').strip()
+                  pem = dec if "PRIVATE KEY" in dec else wrap64(dec)
+              except Exception:
+                  pem = wrap64(raw)
+          out = pathlib.Path(os.environ['RUNNER_TEMP'])/'appstore_api_key.json'
+          out.write_text(json.dumps({'key_id':kid,'issuer_id':iss,'key':pem}), encoding='utf-8')
+          PY
+          grep -q 'PRIVATE KEY' "$JSON_PATH"
+          echo "JSON_PATH=$JSON_PATH" >> "$GITHUB_ENV"
+          echo "Set JSON_PATH=$JSON_PATH"
+
+      - name: Upload to TestFlight (fastlane pilot)
+        shell: bash
+        env:
+          JSON_PATH: ${{ env.JSON_PATH }}
+          IPA_PATH:  ${{ env.IPA_PATH }}
+        run: |
+          set -euo pipefail
+          echo "JSON_PATH=${JSON_PATH:-<empty>}"
+          echo "IPA_PATH=${IPA_PATH:-<empty>}"
+          [ -s "$JSON_PATH" ] || { echo "::error::API key JSON missing"; exit 1; }
+          [ -s "$IPA_PATH" ]  || { echo "::error::IPA file missing"; exit 1; }
+          gem install fastlane -N
+          fastlane pilot upload \
+            --api_key_path "$JSON_PATH" \
+            --ipa "$IPA_PATH" \
+            --skip_submission true \
+            --skip_waiting_for_build_processing true \
+            --verbose
+
+      - name: Cleanup keychain
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          if [[ -n "${KEYCHAIN_PATH:-}" ]]; then
+            security delete-keychain "$KEYCHAIN_PATH" || true
+          fi
