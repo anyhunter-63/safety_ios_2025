@@ -673,7 +673,7 @@ Future<void> _alertByDistance(int dist) async {
   // 150m 이내
   if (dist <= 150) {
     await _vibrate(high: true);
-    await _playAlarm();
+    await _playBeep();
     await _speak("현재 백오십 미터 이내에 엽사가 ${toKoreanPersonCount(_nearCount150)} 있습니다. 즉시 주변을 경계하세요.");
     return;
   }
@@ -681,6 +681,7 @@ Future<void> _alertByDistance(int dist) async {
   // 200m 이내
   if (dist <= 200) {
     await _vibrate(high: true);
+    await _playBeep();
     await _speak("현재 이백 미터 이내에 엽사가 ${toKoreanPersonCount(_nearCount200)} 있습니다. 주의하세요.");
     return;
   }
