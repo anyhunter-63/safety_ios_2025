@@ -196,12 +196,26 @@ class _SafetyHomeState extends State<SafetyHome> {
   @override
   void initState() {
     super.initState();
-    _initDeviceId();
-    _checkFirstAgreement();
 
-    // 🔊 TTS 초기 설정
+    // 🔊 TTS는 context 안 써서 그냥 바로 초기화
     _initTts();
+
+    // ⚠️ context / Navigator 쓰는 것들은 첫 프레임 이후로 미룸
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      try {
+        await _initDeviceId();
+      } catch (e) {
+        debugPrint('❌ deviceId init error: $e');
+      }
+
+      try {
+        await _checkFirstAgreement();
+      } catch (e) {
+        debugPrint('❌ _checkFirstAgreement error: $e');
+      }
+    });
   }
+
 
   Future<void> _speak(String text) async {
     try {
