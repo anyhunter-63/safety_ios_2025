@@ -655,6 +655,11 @@ class _SafetyHomeState extends State<SafetyHome> {
   // 경보
   // ----------------------------------------------------------
   Future<void> _alertByDistance(int dist) async {
+    // 🔹 iOS는 네이티브(LocationService.swift)에서 mp3 재생 → Flutter에서는 음성/진동 안 한다
+    if (Platform.isIOS) {
+      return;
+    }
+
     // 스캔 중이 아니면 어떤 알림도 내지 않음
     if (!_running) {
       debugPrint('ℹ️ alertByDistance: not running, skip alert');
