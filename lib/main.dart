@@ -161,7 +161,7 @@ class _SafetyHomeState extends State<SafetyHome> {
   final AudioPlayer _player = AudioPlayer();
   final FlutterTts _tts = FlutterTts();
 
-  // 🔹 네이티브에서 오는 위치 스트림
+  // 🔹 네이티브에서 오는 위치 스트림 (안드로이드에서만 사용)
   StreamSubscription<Map>? _bgLocationSub;
   double? _lastLat;
   double? _lastLng;
@@ -215,7 +215,6 @@ class _SafetyHomeState extends State<SafetyHome> {
       }
     });
   }
-
 
   Future<void> _speak(String text) async {
     try {
@@ -401,20 +400,22 @@ class _SafetyHomeState extends State<SafetyHome> {
     // 🔊 스캔 시작 안내
     await _speak("안전지키미가 스캔을 시작합니다.");
 
-    // 안드로이드 네이티브 ForegroundService 시작
+    // 안드로이드/IOS 네이티브 서비스 시작 (iOS에서는 LocationService.start() 연결됨)
     await startNativeService();
 
-    // 🔹 네이티브 LocationService 에서 오는 위치 스트림 구독
-    _bgLocationSub ??= BackgroundLocation.stream.listen((event) {
-      try {
-        final lat = (event['lat'] as num).toDouble();
-        final lng = (event['lng'] as num).toDouble();
-        _lastLat = lat;
-        _lastLng = lng;
-      } catch (e) {
-        debugPrint('❌ background location parse error: $e');
-      }
-    });
+    // 🔹 안드로이드에서만 네이티브 LocationService 에서 오는 위치 스트림 구독
+    if (Platform.isAndroid) {
+      _bgLocationSub ??= BackgroundLocation.stream.listen((event) {
+        try {
+          final lat = (event['lat'] as num).toDouble();
+          final lng = (event['lng'] as num).toDouble();
+          _lastLat = lat;
+          _lastLng = lng;
+        } catch (e) {
+          debugPrint('❌ background location parse error: $e');
+        }
+      });
+    }
 
     setState(() => _running = true);
 
@@ -590,12 +591,26 @@ class _SafetyHomeState extends State<SafetyHome> {
   // ----------------------------------------------------------
   Future<void> _checkSafety() async {
     try {
-      if (_lastLat == null || _lastLng == null) {
-        debugPrint('📍 아직 네이티브 위치가 없습니다. 다음 주기까지 대기.');
-        return;
-      }
+      if (Platform.isIOS) {
+        // 🔹 iOS에서는 매 주기마다 Geolocator로 현재 위치를 직접 가져온다.
+        final pos = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+        );
 
-      await _processSafety(_lastLat!, _lastLng!);
+        _lastLat = pos.latitude;
+        _lastLng = pos.longitude;
+
+        debugPrint('📍 periodic position (iOS): ${pos.latitude}, ${pos.longitude}');
+        await _processSafety(pos.latitude, pos.longitude);
+      } else {
+        // 🔹 안드로이드는 네이티브 LocationService(EventChannel)에서 전달받은 위치 사용
+        if (_lastLat == null || _lastLng == null) {
+          debugPrint('📍 아직 네이티브 위치가 없습니다. 다음 주기까지 대기.');
+          return;
+        }
+
+        await _processSafety(_lastLat!, _lastLng!);
+      }
     } catch (e) {
       debugPrint('❌ safety check (native) error: $e');
     }
@@ -709,63 +724,63 @@ class _SafetyHomeState extends State<SafetyHome> {
   // ----------------------------------------------------------
   // 뒤로가기 처리 (하단 버튼 + 시스템 뒤로가기 공통)
   // ----------------------------------------------------------
-Future<bool> _handleBackPressed() async {
-  if (_running) {
-    if (!mounted) return false;
+  Future<bool> _handleBackPressed() async {
+    if (_running) {
+      if (!mounted) return false;
 
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) {
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.warning_amber_rounded, size: 36, color: Colors.red),
-              const SizedBox(height: 12),
-              const Text(
-                '안전모드 동작 중',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
+      await showModalBottomSheet<void>(
+        context: context,
+        backgroundColor: Colors.white,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        ),
+        builder: (ctx) {
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.warning_amber_rounded,
+                    size: 36, color: Colors.red),
+                const SizedBox(height: 12),
+                const Text(
+                  '안전모드 동작 중',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              const Text(
-               '안전모드(근접경보)가 동작 중입니다.\n\n'
-               '종료를 원하시면 앱 하단의 주변 스캔 중지를 누르세요.',
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () => Navigator.of(ctx).pop(),
-                  child: const Text('확인'),
+                const SizedBox(height: 12),
+                const Text(
+                  '안전모드(근접경보)가 동작 중입니다.\n\n'
+                  '종료를 원하시면 앱 하단의 주변 스캔 중지를 누르세요.',
+                  textAlign: TextAlign.center,
                 ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.of(ctx).pop(),
+                    child: const Text('확인'),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      );
 
-    return false; // 여전히 앱은 종료하지 않음
+      return false; // 여전히 앱은 종료하지 않음
+    }
+
+    // 스캔 중이 아니면 바로 종료
+    if (Platform.isAndroid) {
+      SystemNavigator.pop();
+    } else if (Platform.isIOS) {
+      exit(0);
+    }
+    return true;
   }
-
-  // 스캔 중이 아니면 바로 종료
-  if (Platform.isAndroid) {
-    SystemNavigator.pop();
-  } else if (Platform.isIOS) {
-    exit(0);
-  }
-  return true;
-}
-
 
   // ----------------------------------------------------------
   // UI

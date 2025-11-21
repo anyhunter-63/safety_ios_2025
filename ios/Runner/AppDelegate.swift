@@ -42,20 +42,20 @@ import AVFAudio
       nativeServiceChannel.setMethodCallHandler { call, result in
         switch call.method {
         case "startService":
-          // iOS에는 ForegroundService 개념이 없으므로 여기선 별도 작업 없음.
-          // 위치/오디오 세션은 이미 위에서 켜둔 상태라고 보면 됨.
-          NSLog("native_service startService (iOS no-op)")
+          NSLog("native_service startService → LocationService.start()")
+          LocationService.shared.start()
           result(true)
 
         case "stopService":
-          NSLog("native_service stopService (iOS no-op)")
-          // 필요하면 여기서 세션을 끄는 로직을 추가할 수 있음.
+          NSLog("native_service stopService → LocationService.stop()")
+          LocationService.shared.stop()
           result(true)
 
         default:
-          result(FlutterMethodNotImplemented)
+                result(FlutterMethodNotImplemented)
         }
       }
+
     }
 
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
