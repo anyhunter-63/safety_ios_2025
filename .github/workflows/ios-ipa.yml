@@ -39,7 +39,7 @@ jobs:
       KEYCHAIN_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
       KEYCHAIN_NAME: appsign
       P12_PATH: ios_distribution_new.p12
-	PROV_PATH: Safety_iOS_App_Store.mobileprovision
+      PROV_PATH: Safety_iOS_App_Store.mobileprovision
       COCOAPODS_DISABLE_STATS: "YES"
       EXPORT_METHOD: ${{ github.event.inputs.export_method }}
       # ✅ secrets를 env로 미리 매핑 (if에서 env.*로 검사)
