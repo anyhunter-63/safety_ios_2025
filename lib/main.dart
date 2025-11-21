@@ -654,52 +654,45 @@ class _SafetyHomeState extends State<SafetyHome> {
   // ----------------------------------------------------------
   // 경보
   // ----------------------------------------------------------
-  Future<void> _alertByDistance(int dist) async {
-    // 🔹 iOS는 네이티브(LocationService.swift)에서 mp3 재생 → Flutter에서는 음성/진동 안 한다
-    if (Platform.isIOS) {
-      return;
-    }
-
-    // 스캔 중이 아니면 어떤 알림도 내지 않음
-    if (!_running) {
-      debugPrint('ℹ️ alertByDistance: not running, skip alert');
-      return;
-    }
-
-    // dist < 0 이면 아무 것도 안 함
-    if (dist < 0) return;
-
-    // 500m 밖 → 안전 안내
-    if (dist > 500) {
-      await _speak("현재 안전구역 오백 미터 안에 엽사가 없습니다.");
-      return;
-    }
-
-    // 150m 이내
-    if (dist <= 150) {
-      await _vibrate(high: true);
-      await _playAlarm();
-      await _speak(
-          "현재 백오십 미터 이내에 엽사가 ${toKoreanPersonCount(_nearCount150)} 있습니다. 즉시 주변을 경계하세요.");
-      return;
-    }
-
-    // 200m 이내
-    if (dist <= 200) {
-      await _vibrate(high: true);
-      await _speak(
-          "현재 이백 미터 이내에 엽사가 ${toKoreanPersonCount(_nearCount200)} 있습니다. 주의하세요.");
-      return;
-    }
-
-    // 500m 이내
-    if (dist <= 500) {
-      await _vibrate(high: false);
-      await _speak(
-          "현재 오백 미터 이내에 엽사가 ${toKoreanPersonCount(_nearCount500)} 있습니다.");
-      return;
-    }
+Future<void> _alertByDistance(int dist) async {
+  // 스캔 중이 아니면 어떤 알림도 내지 않음
+  if (!_running) {
+    debugPrint('ℹ️ alertByDistance: not running, skip alert');
+    return;
   }
+
+  // dist < 0 이면 아무 것도 안 함
+  if (dist < 0) return;
+
+  // 500m 밖 → 안전 안내
+  if (dist > 500) {
+    await _speak("현재 안전구역 오백 미터 안에 엽사가 없습니다.");
+    return;
+  }
+
+  // 150m 이내
+  if (dist <= 150) {
+    await _vibrate(high: true);
+    await _playAlarm();
+    await _speak("현재 백오십 미터 이내에 엽사가 ${toKoreanPersonCount(_nearCount150)} 있습니다. 즉시 주변을 경계하세요.");
+    return;
+  }
+
+  // 200m 이내
+  if (dist <= 200) {
+    await _vibrate(high: true);
+    await _speak("현재 이백 미터 이내에 엽사가 ${toKoreanPersonCount(_nearCount200)} 있습니다. 주의하세요.");
+    return;
+  }
+
+  // 500m 이내
+  if (dist <= 500) {
+    await _vibrate(high: false);
+    await _speak("현재 오백 미터 이내에 엽사가 ${toKoreanPersonCount(_nearCount500)} 있습니다.");
+    return;
+  }
+}
+
 
   Future<void> _vibrate({required bool high}) async {
     try {
