@@ -21,13 +21,12 @@
 		<string>audio</string>
 		<string>fetch</string>
 		<string>location</string>
-		<string>remote-notification</string>
 	</array>
 
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Safety Ios 2025</string>
+	<string>안전지키미</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
