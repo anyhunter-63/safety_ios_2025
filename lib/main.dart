@@ -708,14 +708,20 @@ Future<void> _alertByDistance(int dist) async {
     }
   }
 
-  Future<void> _playAlarm() async {
+  Future<void> _playBeep() async {
     try {
+      // 혹시 재생 중인 소리 있으면 먼저 정지
       await _player.stop();
+
+      // 짧은 삐 소리 재생
       await _player.play(
         AssetSource('mp3/alarm.mp3'),
       );
+
+      // 삐 소리가 너무 끊기지 않게 약간 기다렸다가 TTS 시작
+      await Future.delayed(const Duration(milliseconds: 400));
     } catch (e) {
-      debugPrint('❌ audio play error: $e');
+      debugPrint('❌ beep play error: $e');
     }
   }
 
