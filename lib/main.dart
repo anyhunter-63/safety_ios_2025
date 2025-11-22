@@ -1025,121 +1025,116 @@ Future<void> _alertByDistance(int dist) async {
             ],
           ),
         ),
-      // 🔻 하단 푸터: 제작사 / 고객센터 / 개인정보처리방침
       bottomNavigationBar: SafeArea(
-        child: Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            border: Border(
-              top: BorderSide(color: Colors.grey.shade300, width: 1),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // ① 뒤로가기(종료) 버튼
+            _buildBottom(),
+
+            // ② 푸터 메뉴
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                border: Border(
+                  top: BorderSide(color: Colors.grey.shade300, width: 1),
+                ),
+              ),
+              child: Row(
+                children: [
+                  // 회사정보
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () => _showCompanyInfo(context),
+                      style: TextButton.styleFrom(
+                        padding:
+                            const EdgeInsets.symmetric(vertical: 10),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: const [
+                          Icon(Icons.info_outline,
+                              size: 18, color: Colors.grey),
+                          SizedBox(height: 2),
+                          Text(
+                            '회사정보',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // 고객센터
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () => _showContactDialog(context),
+                      style: TextButton.styleFrom(
+                        padding:
+                            const EdgeInsets.symmetric(vertical: 10),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: const [
+                          Icon(Icons.mail_outline,
+                              size: 18, color: Colors.grey),
+                          SizedBox(height: 2),
+                          Text(
+                            '고객센터',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // 개인정보
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const PrivacyPolicyPage(),
+                          ),
+                        );
+                      },
+                      style: TextButton.styleFrom(
+                        padding:
+                            const EdgeInsets.symmetric(vertical: 10),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: const [
+                          Icon(Icons.privacy_tip_outlined,
+                              size: 18, color: Colors.grey),
+                          SizedBox(height: 2),
+                          Text(
+                            '개인정보',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          child: Row(
-            children: [
-              // 회사정보
-              Expanded(
-                child: TextButton(
-                  onPressed: () => _showCompanyInfo(context),
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: const [
-                      Icon(Icons.info_outline, size: 18, color: Colors.grey),
-                      SizedBox(height: 2),
-                      Text(
-                        '회사정보',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              // 고객센터
-              Expanded(
-                child: TextButton(
-                  onPressed: () => _showContactDialog(context),
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: const [
-                      Icon(Icons.mail_outline, size: 18, color: Colors.grey),
-                      SizedBox(height: 2),
-                      Text(
-                        '고객센터',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              // 개인정보
-              Expanded(
-                child: TextButton(
-                  onPressed: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const PrivacyPolicyPage(),
-                      ),
-                    );
-                  },
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: const [
-                      Icon(Icons.privacy_tip_outlined,
-                          size: 18, color: Colors.grey),
-                      SizedBox(height: 2),
-                      Text(
-                        '개인정보',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
+          ],
         ),
       ),
-        bottomNavigationBar: SafeArea(
-          child: Padding(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-            child: SizedBox(
-              height: 48,
-              child: OutlinedButton.icon(
-                onPressed: () async {
-                  await _handleBackPressed();
-                },
-                icon: const Icon(Icons.arrow_back),
-                label: const Text(
-                  '뒤로가기 (종료)',
-                  style: TextStyle(fontSize: 16),
-                ),
-              ),
-            ),
-          ),
-        ),
+
       ),
     );
   }
@@ -1171,6 +1166,24 @@ class _ScanProgressBarState extends State<ScanProgressBar>
     _controller.dispose();
     super.dispose();
   }
+
+// 하단 UI
+SizedBox _buildBottom() {
+  return SizedBox(
+    height: 50.0,
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [
+        IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () async {
+            await _handleBackPressed(); // 🔥 여기서 기존 로직 호출
+          },
+        ),
+      ],
+    ),
+  );
+}
 
   @override
   Widget build(BuildContext context) {
