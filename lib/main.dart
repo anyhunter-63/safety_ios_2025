@@ -85,7 +85,7 @@ class _SafetyHomeState extends State<SafetyHome> {
     const tensWords = [
       "", // 0
       "열", // 10
-      "스물", // 20 (← n == 20일 때는 따로 처리)
+      "스물", // 20
       "서른", // 30
       "마흔", // 40
       "쉰", // 50
@@ -104,7 +104,7 @@ class _SafetyHomeState extends State<SafetyHome> {
     if (n < 20) {
       if (n == 10) return "열 명";
       final u = n - 10;
-      return "열${unitWords[u - 1]} 명"; // 열한 명, 열두 명 ...
+      return "열${unitWords[u - 1]} 명";
     }
 
     // 20 : 스무 명 (예외)
@@ -115,7 +115,7 @@ class _SafetyHomeState extends State<SafetyHome> {
     // 21 ~ 29 : 스물한, 스물두, ...
     if (n < 30) {
       final u = n - 20;
-      return "스물${unitWords[u - 1]} 명"; // 스물한 명, 스물두 명 ...
+      return "스물${unitWords[u - 1]} 명";
     }
 
     // 30 ~ 99
@@ -167,11 +167,11 @@ class _SafetyHomeState extends State<SafetyHome> {
   double? _lastLng;
 
   void _startDangerBlink() {
-    _dangerBlinkTimer?.cancel(); // 혹시 돌고 있던 거 있으면 정리
+    _dangerBlinkTimer?.cancel();
     _isDangerBlinkOn = true;
 
     _dangerBlinkTimer = Timer.periodic(
-      const Duration(milliseconds: 600), // 깜빡이는 속도 (원하면 조절)
+      const Duration(milliseconds: 600),
       (_) {
         if (!mounted) return;
         setState(() {
@@ -185,7 +185,6 @@ class _SafetyHomeState extends State<SafetyHome> {
     _dangerBlinkTimer?.cancel();
     _dangerBlinkTimer = null;
 
-    // 꺼질 때는 원을 항상 기본색(진한 색)으로
     if (mounted) {
       setState(() {
         _isDangerBlinkOn = true;
@@ -218,7 +217,6 @@ class _SafetyHomeState extends State<SafetyHome> {
 
   Future<void> _speak(String text) async {
     try {
-      // await _tts.stop(); // 이전 음성 중지
       await _tts.speak(text);
     } catch (e) {
       debugPrint('❌ TTS speak error: $e');
@@ -227,11 +225,9 @@ class _SafetyHomeState extends State<SafetyHome> {
 
   Future<void> _initTts() async {
     try {
-      await _tts.setLanguage('ko-KR'); // 한국어
-      await _tts.setSpeechRate(0.5); // 속도 (0.0 ~ 1.0)
-      await _tts.setPitch(1.0); // 피치
-
-      // 🔹 이 줄 추가: speak()가 끝날 때까지 await가 기다리게 설정
+      await _tts.setLanguage('ko-KR');
+      await _tts.setSpeechRate(0.5);
+      await _tts.setPitch(1.0);
       await _tts.awaitSpeakCompletion(true);
     } catch (e) {
       debugPrint('❌ TTS init error: $e');
@@ -241,9 +237,11 @@ class _SafetyHomeState extends State<SafetyHome> {
   @override
   void dispose() {
     _timer?.cancel();
+    _progressTimer?.cancel();
     _player.dispose();
-    _tts.stop(); // 🔊 말하던 거 있으면 정지
+    _tts.stop();
     _dangerBlinkTimer?.cancel();
+    _bgLocationSub?.cancel();
     super.dispose();
   }
 
@@ -261,8 +259,6 @@ class _SafetyHomeState extends State<SafetyHome> {
     if (!result) {
       exit(0);
     }
-
-    // showGuideDialog 안에서 이미 권한 요청 + 동의 저장이 수행됨.
   }
 
   // ----------------------------------------------------------
@@ -290,7 +286,6 @@ class _SafetyHomeState extends State<SafetyHome> {
   // ----------------------------------------------------------
   Future<void> _sendStopToServer() async {
     try {
-      // deviceId가 아직 비어 있으면 한 번 더 초기화 시도
       if (_deviceId.isEmpty) {
         await _initDeviceId();
         if (_deviceId.isEmpty) {
@@ -325,16 +320,13 @@ class _SafetyHomeState extends State<SafetyHome> {
 
     if (perm == LocationPermission.denied ||
         perm == LocationPermission.deniedForever) {
-      // 기본 권한도 없으면 그냥 false
       return false;
     }
 
-    // 🔹 여기서 whileInUse vs always 구분
     if (perm == LocationPermission.always) {
       return true;
     }
 
-    // 여기까지 오면 "앱 사용 중에만 허용" 상태
     if (!mounted) return false;
 
     final ok = await showDialog<bool>(
@@ -344,8 +336,8 @@ class _SafetyHomeState extends State<SafetyHome> {
             title: const Text(
               '백그라운드 위치 권한 필요',
               style: TextStyle(
-                fontSize: 18, // 👈 원하는 크기로 조절
-                fontWeight: FontWeight.w600, // 기존 굵기 유지하고 싶으면 추가
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
               ),
             ),
             content: const Text(
@@ -368,11 +360,10 @@ class _SafetyHomeState extends State<SafetyHome> {
         false;
 
     if (ok) {
-      // 앱 설정 / 위치 설정 화면 열기
       await Geolocator.openAppSettings();
     }
 
-    return false; // '항상 허용' 아니면 스캔 시작 안 함 (정책 A)
+    return false; // '항상 허용' 아니면 스캔 시작 안 함
   }
 
   // ----------------------------------------------------------
@@ -397,13 +388,10 @@ class _SafetyHomeState extends State<SafetyHome> {
 
   // 🔹 네이티브 ForegroundService + 타이머 시작
   Future<void> _start() async {
-    // 🔊 스캔 시작 안내
     await _speak("안전지키미가 스캔을 시작합니다.");
 
-    // 안드로이드/IOS 네이티브 서비스 시작 (iOS에서는 LocationService.start() 연결됨)
     await startNativeService();
 
-    // 🔹 안드로이드에서만 네이티브 LocationService 에서 오는 위치 스트림 구독
     if (Platform.isAndroid) {
       _bgLocationSub ??= BackgroundLocation.stream.listen((event) {
         try {
@@ -420,10 +408,8 @@ class _SafetyHomeState extends State<SafetyHome> {
     setState(() => _running = true);
 
     _timer?.cancel();
-    // 한 번 즉시 체크
     await _checkSafetyImmediate();
 
-    // 이후 30초마다 서버 체크
     _timer = Timer.periodic(const Duration(seconds: 30), (_) {
       _checkSafety();
     });
@@ -431,9 +417,9 @@ class _SafetyHomeState extends State<SafetyHome> {
     _progress = 0.0;
     _progressTimer?.cancel();
     _progressTimer = Timer.periodic(const Duration(milliseconds: 300), (_) {
-      if (!_running) return; // 안전장치
+      if (!_running) return;
       setState(() {
-        _progress += 0.01; // 약 30초에 1.0 도달
+        _progress += 0.01;
         if (_progress >= 1.0) _progress = 1.0;
       });
     });
@@ -441,12 +427,10 @@ class _SafetyHomeState extends State<SafetyHome> {
 
   // 🔹 네이티브 서비스 + 타이머 정지
   Future<void> _stop() async {
-    // 1️⃣ 우선 논리적으로 '중지 상태'로 먼저 바꾸기
     setState(() {
       _running = false;
     });
 
-    // 2️⃣ 지금 돌고 있는 것들부터 전부 끊기 (타이머/애니메이션/스트림)
     _timer?.cancel();
     _progressTimer?.cancel();
     _stopDangerBlink();
@@ -454,19 +438,14 @@ class _SafetyHomeState extends State<SafetyHome> {
     await _bgLocationSub?.cancel();
     _bgLocationSub = null;
 
-    // 3️⃣ 지금 울리고 있는 경보(음성/알람/진동) 모두 즉시 정지
-    await _stopAllAlerts(); // 이 안에서 TTS.stop(), player.stop(), Vibration.cancel()
+    await _stopAllAlerts();
 
-    // 4️⃣ 스캔 중지 안내 음성 한 번만
     await _speak("스캔을 중지합니다.");
 
-    // 5️⃣ 네이티브 ForegroundService 중지
     await stopNativeService();
 
-    // 6️⃣ CIVIL_GPS_LOG에서 내 좌표 삭제 요청
     await _sendStopToServer();
 
-    // 7️⃣ 화면 상태 초기화
     setState(() {
       _level = 'SAFE';
       _distance = -1;
@@ -509,18 +488,20 @@ class _SafetyHomeState extends State<SafetyHome> {
 
       final data = jsonDecode(body.substring(start, end + 1));
 
-      // 거리 파싱
       final rawDist = data['minDistance'] ?? data['distance'];
       int dist = -1;
-      if (rawDist is int) dist = rawDist;
-      else if (rawDist is double) dist = rawDist.round();
-      else if (rawDist is String) dist = int.tryParse(rawDist) ?? -1;
+      if (rawDist is int) {
+        dist = rawDist;
+      } else if (rawDist is double) {
+        dist = rawDist.round();
+      } else if (rawDist is String) {
+        dist = int.tryParse(rawDist) ?? -1;
+      }
 
-      int within150 = _parseIntField(data['within150']);
-      int within200 = _parseIntField(data['within200']);
-      int within500 = _parseIntField(data['within500']);
+      final within150 = _parseIntField(data['within150']);
+      final within200 = _parseIntField(data['within200']);
+      final within500 = _parseIntField(data['within500']);
 
-      // ⛔ 여기서 먼저 _running 확인 (버튼 안 누른 상태면 다 무시)
       if (!_running) {
         debugPrint('ℹ️ _processSafety called while not running. ignore.');
         return;
@@ -528,10 +509,15 @@ class _SafetyHomeState extends State<SafetyHome> {
 
       String level = 'SAFE';
       if (dist >= 0) {
-        if (dist <= 100) level = '위험';
-        else if (dist <= 150) level = '경계';
-        else if (dist <= 200) level = '주의';
-        else if (dist <= 500) level = '관심';
+        if (dist <= 100) {
+          level = '위험';
+        } else if (dist <= 150) {
+          level = '경계';
+        } else if (dist <= 200) {
+          level = '주의';
+        } else if (dist <= 500) {
+          level = '관심';
+        }
       }
 
       if (!mounted) return;
@@ -544,13 +530,11 @@ class _SafetyHomeState extends State<SafetyHome> {
         _lastCheck = DateTime.now();
       });
 
-      // 혹시 중간에 사용자가 스캔 중지 눌렀으면 여기서도 한 번 더 체크
       if (!_running) {
         debugPrint('ℹ️ _processSafety: stopped during update. skip alerts.');
         return;
       }
 
-      // 🔴 level 바뀔 때 깜빡이 on/off
       if (level == '위험') {
         _startDangerBlink();
       } else {
@@ -563,7 +547,7 @@ class _SafetyHomeState extends State<SafetyHome> {
     }
   }
 
-  // 🔹 스캔 시작 직후 1회: Geolocator로 즉시 위치를 가져와서 바로 체크
+  // 🔹 스캔 시작 직후 1회
   Future<void> _checkSafetyImmediate() async {
     try {
       if (!await _ensureAlwaysLocationPermission()) {
@@ -592,7 +576,6 @@ class _SafetyHomeState extends State<SafetyHome> {
   Future<void> _checkSafety() async {
     try {
       if (Platform.isIOS) {
-        // 🔹 iOS에서는 매 주기마다 Geolocator로 현재 위치를 직접 가져온다.
         final pos = await Geolocator.getCurrentPosition(
           desiredAccuracy: LocationAccuracy.high,
         );
@@ -603,7 +586,6 @@ class _SafetyHomeState extends State<SafetyHome> {
         debugPrint('📍 periodic position (iOS): ${pos.latitude}, ${pos.longitude}');
         await _processSafety(pos.latitude, pos.longitude);
       } else {
-        // 🔹 안드로이드는 네이티브 LocationService(EventChannel)에서 전달받은 위치 사용
         if (_lastLat == null || _lastLng == null) {
           debugPrint('📍 아직 네이티브 위치가 없습니다. 다음 주기까지 대기.');
           return;
@@ -630,7 +612,6 @@ class _SafetyHomeState extends State<SafetyHome> {
   // ----------------------------------------------------------
   Future<void> _stopAllAlerts() async {
     try {
-      // 진동 중지
       if (await Vibration.hasVibrator() ?? false) {
         Vibration.cancel();
       }
@@ -654,46 +635,49 @@ class _SafetyHomeState extends State<SafetyHome> {
   // ----------------------------------------------------------
   // 경보
   // ----------------------------------------------------------
-Future<void> _alertByDistance(int dist) async {
-  // 스캔 중이 아니면 어떤 알림도 내지 않음
-  if (!_running) {
-    debugPrint('ℹ️ alertByDistance: not running, skip alert');
-    return;
+  Future<void> _alertByDistance(int dist) async {
+    if (!_running) {
+      debugPrint('ℹ️ alertByDistance: not running, skip alert');
+      return;
+    }
+
+    if (dist < 0) return;
+
+    // 500m 밖
+    if (dist > 500) {
+      await _speak("현재 안전구역 오백 미터 안에 엽사가 없습니다.");
+      return;
+    }
+
+    // 150m 이내
+    if (dist <= 150) {
+      await _vibrate(high: true);
+      await _playBeep();
+      await _speak(
+        "현재 백오십 미터 이내에 엽사가 ${toKoreanPersonCount(_nearCount150)} 있습니다. 즉시 주변을 경계하세요.",
+      );
+      return;
+    }
+
+    // 200m 이내
+    if (dist <= 200) {
+      await _vibrate(high: true);
+      await _playBeep();
+      await _speak(
+        "현재 이백 미터 이내에 엽사가 ${toKoreanPersonCount(_nearCount200)} 있습니다. 주의하세요.",
+      );
+      return;
+    }
+
+    // 500m 이내
+    if (dist <= 500) {
+      await _vibrate(high: false);
+      await _speak(
+        "현재 오백 미터 이내에 엽사가 ${toKoreanPersonCount(_nearCount500)} 있습니다.",
+      );
+      return;
+    }
   }
-
-  // dist < 0 이면 아무 것도 안 함
-  if (dist < 0) return;
-
-  // 500m 밖 → 안전 안내
-  if (dist > 500) {
-    await _speak("현재 안전구역 오백 미터 안에 엽사가 없습니다.");
-    return;
-  }
-
-  // 150m 이내
-  if (dist <= 150) {
-    await _vibrate(high: true);
-    await _playBeep();
-    await _speak("현재 백오십 미터 이내에 엽사가 ${toKoreanPersonCount(_nearCount150)} 있습니다. 즉시 주변을 경계하세요.");
-    return;
-  }
-
-  // 200m 이내
-  if (dist <= 200) {
-    await _vibrate(high: true);
-    await _playBeep();
-    await _speak("현재 이백 미터 이내에 엽사가 ${toKoreanPersonCount(_nearCount200)} 있습니다. 주의하세요.");
-    return;
-  }
-
-  // 500m 이내
-  if (dist <= 500) {
-    await _vibrate(high: false);
-    await _speak("현재 오백 미터 이내에 엽사가 ${toKoreanPersonCount(_nearCount500)} 있습니다.");
-    return;
-  }
-}
-
 
   Future<void> _vibrate({required bool high}) async {
     try {
@@ -711,15 +695,12 @@ Future<void> _alertByDistance(int dist) async {
 
   Future<void> _playBeep() async {
     try {
-      // 혹시 재생 중인 소리 있으면 먼저 정지
       await _player.stop();
 
-      // 짧은 삐 소리 재생
       await _player.play(
-        AssetSource('mp3/alarm.mp3'),
+        const AssetSource('mp3/alarm.mp3'),
       );
 
-      // 삐 소리가 너무 끊기지 않게 약간 기다렸다가 TTS 시작
       await Future.delayed(const Duration(milliseconds: 1500));
     } catch (e) {
       debugPrint('❌ beep play error: $e');
@@ -727,7 +708,7 @@ Future<void> _alertByDistance(int dist) async {
   }
 
   // ----------------------------------------------------------
-  // 뒤로가기 처리 (하단 버튼 + 시스템 뒤로가기 공통)
+  // 뒤로가기 처리
   // ----------------------------------------------------------
   Future<bool> _handleBackPressed() async {
     if (_running) {
@@ -745,8 +726,11 @@ Future<void> _alertByDistance(int dist) async {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.warning_amber_rounded,
-                    size: 36, color: Colors.red),
+                const Icon(
+                  Icons.warning_amber_rounded,
+                  size: 36,
+                  color: Colors.red,
+                ),
                 const SizedBox(height: 12),
                 const Text(
                   '안전모드 동작 중',
@@ -775,10 +759,9 @@ Future<void> _alertByDistance(int dist) async {
         },
       );
 
-      return false; // 여전히 앱은 종료하지 않음
+      return false;
     }
 
-    // 스캔 중이 아니면 바로 종료
     if (Platform.isAndroid) {
       SystemNavigator.pop();
     } else if (Platform.isIOS) {
@@ -788,30 +771,25 @@ Future<void> _alertByDistance(int dist) async {
   }
 
   // ----------------------------------------------------------
-  // UI
+  // UI 색/텍스트
   // ----------------------------------------------------------
   Color _levelColorByDistance() {
-    // 500m 넘으면 SAFE (초록)
     if (_distance < 0 || _distance > 500) {
       return Colors.green.shade400;
     }
 
-    // 0 ~ 100m → 위험 (빨강)
     if (_distance <= 100) {
       return Colors.red.shade400;
     }
 
-    // 100 ~ 150m → 경계 (진한 주황빛)
     if (_distance <= 150) {
       return Colors.deepOrange.shade400;
     }
 
-    // 150 ~ 200m → 주의 (노란빛)
     if (_distance <= 200) {
       return Colors.orange.shade400;
     }
 
-    // 200 ~ 500m → 관심 (연노랑)
     return Colors.yellow.shade600;
   }
 
@@ -870,7 +848,7 @@ Future<void> _alertByDistance(int dist) async {
         content: const Text(
           '앱 이름: 안전지키미\n'
           '제작: Light City Software\n'
-	    '(빛고을소프트웨어)\n\n'
+          '\t(빛고을소프트웨어)\n\n'
           '본 앱은 엽사(수렵인)와의 거리 정보를 기반으로 총기 오인사고를 예방하기 위해 제작되었습니다.',
         ),
         actions: [
@@ -903,6 +881,26 @@ Future<void> _alertByDistance(int dist) async {
     );
   }
 
+  // ----------------------------------------------------------
+  // 하단 UI: 뒤로가기 버튼 + 푸터
+  // ----------------------------------------------------------
+  Widget _buildBottom() {
+    return SizedBox(
+      height: 50.0,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () async {
+              await _handleBackPressed();
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final last = _lastCheck == null
@@ -911,17 +909,14 @@ Future<void> _alertByDistance(int dist) async {
 
     final caution = _cautionText();
 
-    // 🔹 원 기본색 (거리 기준)
     final baseColor = _levelColorByDistance();
 
-    // 🔴 "위험"일 때는 깜빡이는 색 적용
     final Color circleColor;
     if (_level == '위험') {
-      circleColor = _isDangerBlinkOn
-          ? baseColor // 켜진 상태 (진한 빨강 계열)
-          : baseColor.withOpacity(0.2); // 꺼진 상태 (옅은 색)
+      circleColor =
+          _isDangerBlinkOn ? baseColor : baseColor.withOpacity(0.2);
     } else {
-      circleColor = baseColor; // 위험 아니면 그냥 기본색
+      circleColor = baseColor;
     }
 
     return WillPopScope(
@@ -1007,8 +1002,10 @@ Future<void> _alertByDistance(int dist) async {
                 style: ElevatedButton.styleFrom(
                   backgroundColor:
                       _running ? Colors.green.shade700 : Colors.green,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 60, vertical: 18),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 60,
+                    vertical: 18,
+                  ),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(40),
                   ),
@@ -1025,121 +1022,133 @@ Future<void> _alertByDistance(int dist) async {
             ],
           ),
         ),
-      bottomNavigationBar: SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // ① 뒤로가기(종료) 버튼
-            _buildBottom(),
+        bottomNavigationBar: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // ① 뒤로가기(종료) 버튼
+              _buildBottom(),
 
-            // ② 푸터 메뉴
-            Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                border: Border(
-                  top: BorderSide(color: Colors.grey.shade300, width: 1),
+              // ② 푸터 메뉴
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  border: Border(
+                    top: BorderSide(
+                      color: Colors.grey.shade300,
+                      width: 1,
+                    ),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    // 회사정보
+                    Expanded(
+                      child: TextButton(
+                        onPressed: () => _showCompanyInfo(context),
+                        style: TextButton.styleFrom(
+                          padding:
+                              const EdgeInsets.symmetric(vertical: 10),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: const [
+                            Icon(
+                              Icons.info_outline,
+                              size: 18,
+                              color: Colors.grey,
+                            ),
+                            SizedBox(height: 2),
+                            Text(
+                              '회사정보',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    // 고객센터
+                    Expanded(
+                      child: TextButton(
+                        onPressed: () => _showContactDialog(context),
+                        style: TextButton.styleFrom(
+                          padding:
+                              const EdgeInsets.symmetric(vertical: 10),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: const [
+                            Icon(
+                              Icons.mail_outline,
+                              size: 18,
+                              color: Colors.grey,
+                            ),
+                            SizedBox(height: 2),
+                            Text(
+                              '고객센터',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    // 개인정보
+                    Expanded(
+                      child: TextButton(
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const PrivacyPolicyPage(),
+                            ),
+                          );
+                        },
+                        style: TextButton.styleFrom(
+                          padding:
+                              const EdgeInsets.symmetric(vertical: 10),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: const [
+                            Icon(
+                              Icons.privacy_tip_outlined,
+                              size: 18,
+                              color: Colors.grey,
+                            ),
+                            SizedBox(height: 2),
+                            Text(
+                              '개인정보',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              child: Row(
-                children: [
-                  // 회사정보
-                  Expanded(
-                    child: TextButton(
-                      onPressed: () => _showCompanyInfo(context),
-                      style: TextButton.styleFrom(
-                        padding:
-                            const EdgeInsets.symmetric(vertical: 10),
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: const [
-                          Icon(Icons.info_outline,
-                              size: 18, color: Colors.grey),
-                          SizedBox(height: 2),
-                          Text(
-                            '회사정보',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                  // 고객센터
-                  Expanded(
-                    child: TextButton(
-                      onPressed: () => _showContactDialog(context),
-                      style: TextButton.styleFrom(
-                        padding:
-                            const EdgeInsets.symmetric(vertical: 10),
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: const [
-                          Icon(Icons.mail_outline,
-                              size: 18, color: Colors.grey),
-                          SizedBox(height: 2),
-                          Text(
-                            '고객센터',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                  // 개인정보
-                  Expanded(
-                    child: TextButton(
-                      onPressed: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => const PrivacyPolicyPage(),
-                          ),
-                        );
-                      },
-                      style: TextButton.styleFrom(
-                        padding:
-                            const EdgeInsets.symmetric(vertical: 10),
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: const [
-                          Icon(Icons.privacy_tip_outlined,
-                              size: 18, color: Colors.grey),
-                          SizedBox(height: 2),
-                          Text(
-                            '개인정보',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
-      ),
-
       ),
     );
   }
 }
 
+// 📶 스캔 진행 바
 class ScanProgressBar extends StatefulWidget {
   const ScanProgressBar({super.key});
 
@@ -1157,8 +1166,8 @@ class _ScanProgressBarState extends State<ScanProgressBar>
 
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1300), // 왕복 속도
-    )..repeat(); // 계속 왕복
+      duration: const Duration(milliseconds: 1300),
+    )..repeat();
   }
 
   @override
@@ -1166,24 +1175,6 @@ class _ScanProgressBarState extends State<ScanProgressBar>
     _controller.dispose();
     super.dispose();
   }
-
-// 하단 UI
-SizedBox _buildBottom() {
-  return SizedBox(
-    height: 50.0,
-    child: Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      children: [
-        IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () async {
-            await _handleBackPressed(); // 🔥 여기서 기존 로직 호출
-          },
-        ),
-      ],
-    ),
-  );
-}
 
   @override
   Widget build(BuildContext context) {
@@ -1194,11 +1185,10 @@ SizedBox _buildBottom() {
         child: LayoutBuilder(
           builder: (context, constraints) {
             final fullWidth = constraints.maxWidth;
-            final barWidth = fullWidth * 0.18; // 막대 길이
+            final barWidth = fullWidth * 0.18;
 
             return Stack(
               children: [
-                // 배경 라인
                 Container(
                   width: fullWidth,
                   height: 6,
@@ -1207,13 +1197,10 @@ SizedBox _buildBottom() {
                     borderRadius: BorderRadius.circular(3),
                   ),
                 ),
-
-                // 왕복하는 스캔 바
                 AnimatedBuilder(
                   animation: _controller,
                   builder: (_, __) {
-                    final t = _controller.value; // 0.0 ~ 1.0
-                    // 0→1/2 : 0→1 , 1/2→1 : 1→0  (삼각파)
+                    final t = _controller.value;
                     final tri = t <= 0.5 ? t * 2 : (2 - 2 * t);
                     final maxLeft = fullWidth - barWidth;
                     final left = tri * maxLeft;
@@ -1312,7 +1299,6 @@ Light City Software(이하 "회사")는 안전지키미 서비스 제공을 위�
       body: SafeArea(
         child: Column(
           children: [
-            // 내용 스크롤
             const Expanded(
               child: SingleChildScrollView(
                 padding: EdgeInsets.all(16),
@@ -1322,7 +1308,6 @@ Light City Software(이하 "회사")는 안전지키미 서비스 제공을 위�
                 ),
               ),
             ),
-            // 닫기 버튼
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
               child: SizedBox(
