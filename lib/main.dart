@@ -1025,6 +1025,102 @@ Future<void> _alertByDistance(int dist) async {
             ],
           ),
         ),
+      // 🔻 하단 푸터: 제작사 / 고객센터 / 개인정보처리방침
+      bottomNavigationBar: SafeArea(
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border(
+              top: BorderSide(color: Colors.grey.shade300, width: 1),
+            ),
+          ),
+          child: Row(
+            children: [
+              // 회사정보
+              Expanded(
+                child: TextButton(
+                  onPressed: () => _showCompanyInfo(context),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: const [
+                      Icon(Icons.info_outline, size: 18, color: Colors.grey),
+                      SizedBox(height: 2),
+                      Text(
+                        '회사정보',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // 고객센터
+              Expanded(
+                child: TextButton(
+                  onPressed: () => _showContactDialog(context),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: const [
+                      Icon(Icons.mail_outline, size: 18, color: Colors.grey),
+                      SizedBox(height: 2),
+                      Text(
+                        '고객센터',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // 개인정보
+              Expanded(
+                child: TextButton(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const PrivacyPolicyPage(),
+                      ),
+                    );
+                  },
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: const [
+                      Icon(Icons.privacy_tip_outlined,
+                          size: 18, color: Colors.grey),
+                      SizedBox(height: 2),
+                      Text(
+                        '개인정보',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
         bottomNavigationBar: SafeArea(
           child: Padding(
             padding:
