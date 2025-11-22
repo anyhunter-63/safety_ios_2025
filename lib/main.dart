@@ -698,7 +698,7 @@ class _SafetyHomeState extends State<SafetyHome> {
       await _player.stop();
 
       await _player.play(
-        const AssetSource('mp3/alarm.mp3'),
+        AssetSource('mp3/alarm.mp3'),
       );
 
       await Future.delayed(const Duration(milliseconds: 1500));
