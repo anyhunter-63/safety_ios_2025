@@ -1,5 +1,3 @@
-// ios/Runner/AppDelegate.swift
-
 import UIKit
 import Flutter
 import AVFAudio
@@ -15,13 +13,16 @@ import AVFAudio
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
 
-    // 플러터 플러그인 등록
+    // 1) 플러터 플러그인 등록
     GeneratedPluginRegistrant.register(with: self)
 
-    // ✅ 백그라운드 오디오 세션 설정 (무음이어도 세션이 살아있어야 안정적)
+    // 2) 오디오 세션 먼저 구성 (TTS 포함 전체 오디오 공통 세팅)
     configureAudioSession()
 
-    // ✅ Flutter <-> iOS 브릿지 채널 (안전지키미용)
+    // 3) FlutterAppDelegate 기본 처리
+    let result = super.application(application, didFinishLaunchingWithOptions: launchOptions)
+
+    // 4) Flutter <-> iOS 브릿지 채널 (안전지키미용)
     if let controller = window?.rootViewController as? FlutterViewController {
 
       // Android에서 쓰는 native_service 채널을 iOS에서도 구현
@@ -48,18 +49,20 @@ import AVFAudio
       }
     }
 
-    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    return result
   }
 
-  // MARK: - Audio Session (백그라운드 유지용)
+  // MARK: - Audio Session (백그라운드 유지 + TTS 최적화)
 
   private func configureAudioSession() {
     do {
       let session = AVAudioSession.sharedInstance()
-      // playback + mixWithOthers 로 백그라운드 오디오 유지
-      try session.setCategory(.playback, options: [.mixWithOthers])
+      // 🔊 TTS(음성안내)에 맞게 spokenAudio 모드 사용
+      try session.setCategory(.playback,
+                              mode: .spokenAudio,
+                              options: [.mixWithOthers])
       try session.setActive(true)
-      NSLog("[AppDelegate] Audio session configured for background playback")
+      NSLog("[AppDelegate] Audio session configured for background playback + spokenAudio")
     } catch {
       NSLog("[AppDelegate] Audio session error: \(error.localizedDescription)")
     }
