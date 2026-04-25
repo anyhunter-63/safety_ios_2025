@@ -224,6 +224,7 @@ class _SafetyHomeState extends State<SafetyHome> {
   String _level = 'SAFE';
   int _distance = -1;
 
+  int _nearCount20 = 0;
   int _nearCount150 = 0;
   int _nearCount200 = 0;
   int _nearCount500 = 0;
@@ -519,6 +520,7 @@ Future<void> _initDeviceId() async {
     setState(() {
       _level = 'SAFE';
       _distance = -1;
+      _nearCount20 = 0;
       _nearCount150 = 0;
       _nearCount200 = 0;
       _nearCount500 = 0;
@@ -568,6 +570,7 @@ Future<void> _initDeviceId() async {
         dist = int.tryParse(rawDist) ?? -1;
       }
 
+      final within20 = _parseIntField(data['within20']);
       final within150 = _parseIntField(data['within150']);
       final within200 = _parseIntField(data['within200']);
       final within500 = _parseIntField(data['within500']);
@@ -579,21 +582,18 @@ Future<void> _initDeviceId() async {
 
       String level = 'SAFE';
       if (dist >= 0) {
-        if (dist <= 100) {
-          level = '위험';
-        } else if (dist <= 150) {
-          level = '경계';
-        } else if (dist <= 200) {
-          level = '주의';
-        } else if (dist <= 500) {
-          level = '관심';
-        }
+        if (dist <= 20) level = '주의';
+        else if (dist <= 100) level = '위험';
+        else if (dist <= 150) level = '경계';
+        else if (dist <= 200) level = '주의';
+        else if (dist <= 500) level = '관심';
       }
 
       if (!mounted) return;
       setState(() {
         _level = level;
         _distance = dist;
+	_nearCount20 = within20;
         _nearCount150 = within150;
         _nearCount200 = within200;
         _nearCount500 = within500;
@@ -705,49 +705,60 @@ Future<void> _initDeviceId() async {
   // ----------------------------------------------------------
   // 경보
   // ----------------------------------------------------------
-  Future<void> _alertByDistance(int dist) async {
-    if (!_running) {
-      debugPrint('ℹ️ alertByDistance: not running, skip alert');
-      return;
-    }
-
-    if (dist < 0) return;
-
-    // 500m 밖
-    if (dist > 500) {
-      await _speak("현재 안전구역 오백 미터 안에 엽사가 없습니다.");
-      return;
-    }
-
-    // 150m 이내
-    if (dist <= 150) {
-      await _vibrate(high: true);
-      await _playBeep();
-      await _speak(
-        "현재 백오십 미터 이내에 엽사가 ${toKoreanPersonCount(_nearCount150)} 있습니다. 즉시 주변을 경계하세요.",
-      );
-      return;
-    }
-
-    // 200m 이내
-    if (dist <= 200) {
-      await _vibrate(high: true);
-      await _playBeep();
-      await _speak(
-        "현재 이백 미터 이내에 엽사가 ${toKoreanPersonCount(_nearCount200)} 있습니다. 주의하세요.",
-      );
-      return;
-    }
-
-    // 500m 이내
-    if (dist <= 500) {
-      await _vibrate(high: false);
-      await _speak(
-        "현재 오백 미터 이내에 엽사가 ${toKoreanPersonCount(_nearCount500)} 있습니다.",
-      );
-      return;
-    }
+Future<void> _alertByDistance(int dist) async {
+  if (!_running) {
+    debugPrint('ℹ️ alertByDistance: not running, skip alert');
+    return;
   }
+
+  if (dist < 0) return;
+
+  /*
+   * 20m 이내는 경보 없음.
+   * 화면 텍스트만 표시한다.
+   * 진동, 비프음, TTS 모두 실행하지 않는다.
+   */
+  if (dist <= 20) {
+    debugPrint("ℹ️ 20m 이내 → 경보 없이 텍스트만 표시");
+    await _stopAllAlerts();
+    return;
+  }
+
+  // 500m 밖
+  if (dist > 500) {
+    await _speak("현재 안전구역 오백 미터 안에 엽사가 없습니다.");
+    return;
+  }
+
+  // 150m 이내
+  if (dist <= 150) {
+    await _vibrate(high: true);
+    await _playBeep();
+    await _speak(
+      "현재 백오십 미터 이내에 엽사가 ${toKoreanPersonCount(_nearCount150)} 있습니다. 즉시 주변을 경계하세요.",
+    );
+    return;
+  }
+
+  // 200m 이내
+  if (dist <= 200) {
+    await _vibrate(high: true);
+    await _playBeep();
+    await _speak(
+      "현재 이백 미터 이내에 엽사가 ${toKoreanPersonCount(_nearCount200)} 있습니다. 주의하세요.",
+    );
+    return;
+  }
+
+  // 500m 이내
+  if (dist <= 500) {
+    await _vibrate(high: false);
+    await _speak(
+      "현재 오백 미터 이내에 엽사가 ${toKoreanPersonCount(_nearCount500)} 있습니다.",
+    );
+    return;
+  }
+}
 
   Future<void> _vibrate({required bool high}) async {
     try {
@@ -843,30 +854,48 @@ Future<void> _initDeviceId() async {
   // ----------------------------------------------------------
   // UI 색/텍스트
   // ----------------------------------------------------------
-  Color _levelColorByDistance() {
-    if (_distance < 0 || _distance > 500) {
-      return Colors.green.shade400;
-    }
-
-    if (_distance <= 100) {
-      return Colors.red.shade400;
-    }
-
-    if (_distance <= 150) {
-      return Colors.deepOrange.shade400;
-    }
-
-    if (_distance <= 200) {
-      return Colors.orange.shade400;
-    }
-
-    return Colors.yellow.shade600;
+Color _levelColorByDistance() {
+  if (_distance < 0 || _distance > 500) {
+    return Colors.green.shade400;
   }
+
+  /*
+   * 20m 이내는 경보 구간에서 제외.
+   * 텍스트만 보여주고 색상은 주의색 정도로만 표시한다.
+   */
+  if (_distance <= 20) {
+    return Colors.orange.shade300;
+  }
+
+  // 🔴 150m 이내에 20m 바깥 엽사 존재
+  if ((_nearCount150 - _nearCount20) > 0) {
+    return Colors.red.shade400;
+  }
+
+  if (_distance <= 100) {
+    return Colors.red.shade400;
+  }
+
+  if (_distance <= 150) {
+    return Colors.deepOrange.shade400;
+  }
+
+  if (_distance <= 200) {
+    return Colors.orange.shade400;
+  }
+
+  return Colors.yellow.shade600;
+}
 
   Widget _buildRangeMessage() {
     if (_distance < 0) {
       return const Text("");
     }
+
+  if (_distance <= 20) {
+    return Text("20m 이내 엽사 $_nearCount20명",
+        style: const TextStyle(fontSize: 15));
+  }
 
     if (_distance > 500) {
       return const Text(
@@ -902,6 +931,7 @@ Future<void> _initDeviceId() async {
 
   String _cautionText() {
     if (_distance < 0) return "";
+    if (_distance <= 20) return "초근접거리에 엽사가 있습니다.\n주의하세요";
     if (_distance > 500) return "현재는 안전한 상태입니다";
     if (_distance <= 150) return "즉시 주변을 경계하세요";
     return "주의하세요";

@@ -2,7 +2,7 @@ name: safety_guard
 description: 안전지키미 – 엽사 근접 경보 앱
 publish_to: "none"
 
-version: 1.0.2+16
+version: 1.0.3+17
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
