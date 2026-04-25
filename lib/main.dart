@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:safety_guard/common/common.dart';
 import 'package:flutter/foundation.dart';
@@ -8,7 +9,6 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:get_storage/get_storage.dart';
 import 'package:http/http.dart' as http;
-import 'package:device_info_plus/device_info_plus.dart';
 import 'package:vibration/vibration.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/services.dart';
@@ -44,6 +44,79 @@ class BackgroundLocation {
 
   static Stream<Map> get stream =>
       _channel.receiveBroadcastStream().map((e) => Map.from(e));
+}
+
+class CivilDeviceId {
+  static const String _prefKey = 'civil_safety_install_device_id';
+
+  static Future<String> getDeviceId() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    final saved = prefs.getString(_prefKey);
+
+    if (saved != null && saved.trim().isNotEmpty && !_isBadDeviceId(saved)) {
+      return saved.trim();
+    }
+
+    final prefix = Platform.isAndroid
+        ? 'android'
+        : Platform.isIOS
+            ? 'ios'
+            : 'app';
+
+    final newId = '$prefix-${_makeUuidLike()}';
+
+    await prefs.setString(_prefKey, newId);
+
+    return newId;
+  }
+
+  static bool _isBadDeviceId(String value) {
+    final v = value.trim();
+
+    if (v.isEmpty) return true;
+    if (v == 'IOS-DEVICE') return true;
+    if (v.length < 20) return true;
+
+    /*
+     * Android Build.ID 예:
+     * BP4A.251205.006
+     * AP3A.240905.015.A2
+     */
+    final androidBuildIdPattern =
+        RegExp(r'^[A-Z]{2,4}[0-9A-Z]?\.[0-9]{6}\.[0-9]{3}(\.[A-Z0-9]+)?$');
+
+    if (androidBuildIdPattern.hasMatch(v)) return true;
+
+    final lower = v.toLowerCase();
+    if (lower == 'android' ||
+        lower == 'iphone' ||
+        lower == 'ios' ||
+        lower == 'unknown' ||
+        lower == 'null' ||
+        lower == 'device') {
+      return true;
+    }
+
+    return false;
+  }
+
+  static String _makeUuidLike() {
+    final r = Random.secure();
+
+    String hex(int length) {
+      const chars = '0123456789abcdef';
+      final sb = StringBuffer();
+
+      for (int i = 0; i < length; i++) {
+        sb.write(chars[r.nextInt(chars.length)]);
+      }
+
+      return sb.toString();
+    }
+
+    return '${hex(8)}-${hex(4)}-${hex(4)}-${hex(4)}-${hex(12)}';
+  }
 }
 
 class SafeApp extends StatelessWidget {
@@ -264,22 +337,19 @@ class _SafetyHomeState extends State<SafetyHome> {
   // ----------------------------------------------------------
   // 디바이스 ID
   // ----------------------------------------------------------
-  Future<void> _initDeviceId() async {
-    try {
-      final info = DeviceInfoPlugin();
-      if (Platform.isAndroid) {
-        final android = await info.androidInfo;
-        _deviceId = android.id;
-      } else {
-        _deviceId = 'IOS-DEVICE';
-      }
-      if (mounted) {
-        setState(() {});
-      }
-    } catch (e) {
-      debugPrint('❌ deviceId init error: $e');
+Future<void> _initDeviceId() async {
+  try {
+    _deviceId = await CivilDeviceId.getDeviceId();
+
+    debugPrint('✅ civil deviceId=$_deviceId');
+
+    if (mounted) {
+      setState(() {});
     }
+  } catch (e) {
+    debugPrint('❌ deviceId init error: $e');
   }
+}
 
   // ----------------------------------------------------------
   // 스캔 중지 시 서버에 CIVIL_GPS_LOG 삭제 요청
