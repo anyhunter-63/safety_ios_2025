@@ -1,0 +1,44 @@
+안전지키미 Android+iOS 통합 프로젝트
+=====================================
+
+1. 기준 구조
+- Flutter/Dart 공통 소스: lib/
+- Android 전용: android/
+- iOS 전용: ios/
+- GitHub Actions iOS 빌드: .github/workflows/ios-ipa.yml
+
+2. 지도보기 기능
+- 메인 화면에 [지도보기] 버튼 추가
+- 평상시/위험시 관계없이 진입 가능
+- 현재 사용자 위치를 항상 지도 중심으로 표시
+- 주변 수렵인 위치를 마커로 표시
+- 5초마다 현재 위치와 수렵인 위치 갱신
+- 150m / 500m 반경 표시
+- 수렵인 UID/이름은 앱으로 보내지 않음
+
+3. 서버 PHP
+별도 제공되는 civil_safety_ping_지도기능.php를 서버의
+/BIO/civil_safety_ping.php 로 교체해야 지도 마커가 표시됩니다.
+기존 위험거리 계산은 유지하고 hunters 좌표 배열만 추가합니다.
+지도보기 요청(mapOnly=1)에서는 CIVIL_GPS_LOG에 일반인 위치를 저장하지 않습니다.
+
+4. 패키지
+pubspec.yaml에 flutter_map 7.0.2, latlong2 0.9.1 추가.
+GitHub iOS 빌드의 Flutter 3.24.5와 맞추기 위해 기존 iOS 프로젝트에서 사용하던
+호환 버전 계열을 유지했습니다.
+
+5. Android PC 빌드
+flutter pub get
+flutter build appbundle --release
+(또는 flutter build apk --release)
+
+※ release 서명용 keystore와 local.properties는 보안상 이 묶음에서 제외했습니다.
+기존 Android 프로젝트의 해당 로컬 파일을 그대로 사용하세요.
+
+6. iOS Git 빌드
+이 통합 프로젝트를 Git 저장소에 올리면 기존 .github/workflows/ios-ipa.yml을
+그대로 사용하여 macOS GitHub Actions에서 iOS를 빌드할 수 있습니다.
+
+7. 버전
+pubspec.yaml은 통합 시점에 version: 1.0.7+18 로 설정했습니다.
+스토어 제출 전 실제 배포 버전에 맞게 조정하세요.

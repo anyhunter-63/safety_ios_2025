@@ -6,9 +6,48 @@ plugins {
 }
 
 android {
-    namespace = "com.example.safety_ios_2025"
-    compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    namespace = "com.civilsafety.app"
+
+    compileSdk = 36
+//    ndkVersion = flutter.ndkVersion
+
+    defaultConfig {
+        applicationId = "com.civilsafety.app"
+        minSdk = 24
+        targetSdk = 36
+
+        versionCode = flutter.versionCode
+        versionName = flutter.versionName
+    }
+
+    // 🔐 release 서명 설정 (하드코딩 버전)
+    signingConfigs {
+        create("release") {
+            // ⚠ 여기 패스워드를 keytool에서 입력한 실제 비밀번호로 바꿔줄 것
+            storeFile = file("upload-keystore.jks")   // android/app 기준 경로
+            storePassword = "tkfkdgkwk11@#"
+            keyAlias = "upload"
+            keyPassword = "tkfkdgkwk11@#"          // 보통 storePassword와 같게 했을 것
+        }
+    }
+
+    buildTypes {
+        debug {
+            // debug 기본 설정
+        }
+        release {
+            // ✅ 우리가 만든 release 키로 서명
+            signingConfig = signingConfigs.getByName("release")
+
+            // 🔥 코드/리소스 축소 (Flutter 기본 스타일)
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+    }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -18,25 +57,10 @@ android {
     kotlinOptions {
         jvmTarget = JavaVersion.VERSION_11.toString()
     }
+}
 
-    defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.example.safety_ios_2025"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
-        versionCode = flutter.versionCode
-        versionName = flutter.versionName
-    }
-
-    buildTypes {
-        release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
-        }
-    }
+dependencies {
+    implementation("com.google.android.gms:play-services-location:21.3.0")
 }
 
 flutter {

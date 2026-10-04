@@ -1,4 +1,4 @@
-package com.example.safety_ios_2025
+package com.example.android
 
 import io.flutter.embedding.android.FlutterActivity
 
