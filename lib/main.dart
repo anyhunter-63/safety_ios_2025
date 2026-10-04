@@ -17,6 +17,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'hunter_map_page.dart';
+import 'connected_regions_page.dart';
 
 
 void main() {
@@ -306,6 +307,14 @@ class _SafetyHomeState extends State<SafetyHome> {
 
   Timer? _timer;
   bool _running = false;
+
+  // 서버 안전 체크 중복 실행 방지
+  bool _safetyCheckInProgress = false;
+
+  // 동일 경보는 60초 간격, 위험도 상승 시 즉시 재경보
+  DateTime? _lastAlertAt;
+  int _lastAlertPriority = 0;
+  static const Duration _sameAlertInterval = Duration(seconds: 60);
 
   bool _batteryGuideDialogShowing = false;
 
@@ -717,17 +726,17 @@ void _toggle() async {
     // 한 번 즉시 체크
     await _checkSafetyImmediate();
 
-    // 이후 30초마다 서버 체크
-    _timer = Timer.periodic(const Duration(seconds: 30), (_) {
+    // 이후 10초마다 서버 체크
+    _timer = Timer.periodic(const Duration(seconds: 10), (_) {
       _checkSafety();
     });
 
     _progress = 0.0;
     _progressTimer?.cancel();
     _progressTimer = Timer.periodic(const Duration(milliseconds: 300), (_) {
-      if (!_running) return; // 안전장치
+      if (!_running || !mounted) return;
       setState(() {
-        _progress += 0.01; // 약 30초에 1.0 도달
+        _progress += 0.03; // 약 10초에 1.0 도달
         if (_progress >= 1.0) _progress = 1.0;
       });
     });
@@ -770,6 +779,9 @@ void _toggle() async {
       _nearCount500 = 0;
       _lastCheck = null;
       _progress = 0.0;
+      _lastAlertAt = null;
+      _lastAlertPriority = 0;
+      _safetyCheckInProgress = false;
     });
   }
 
@@ -823,12 +835,42 @@ void _toggle() async {
       }
 
       String level = 'SAFE';
-      if (dist >= 0) {
-        if (dist <= 20) level = '주의';
-        else if (dist <= 100) level = '위험';
-        else if (dist <= 150) level = '경계';
-        else if (dist <= 200) level = '주의';
-        else if (dist <= 500) level = '관심';
+
+      // ----------------------------------------------------------
+      // 중요:
+      // minDistance 하나만으로 위험도를 판단하면,
+      // 20m 이내 엽사와 80m 엽사가 동시에 있을 때
+      // 20m 엽사만 보고 80m 엽사를 놓치는 문제가 생긴다.
+      //
+      // 따라서 "20m 밖에 있는 다른 엽사"가 있는지 누적 카운트로
+      // 먼저 확인한다.
+      // ----------------------------------------------------------
+      final count21to150 = max(0, within150 - within20);
+      final count151to200 = max(0, within200 - within150);
+      final count201to500 = max(0, within500 - within200);
+
+      if (count21to150 > 0) {
+        // 서버 응답에는 현재 within100이 없으므로,
+        // 20m 안쪽 엽사가 최단거리로 잡힌 혼합 상황에서는
+        // 안전을 우선하여 21~150m 존재를 '위험'으로 처리한다.
+        if (dist > 20 && dist <= 100) {
+          level = '위험';
+        } else if (dist > 100 && dist <= 150) {
+          level = '경계';
+        } else {
+          // 예: 20m + 80m / 20m + 120m
+          // 정확한 두 번째 거리값은 서버가 주지 않으므로 보수적으로 위험 처리
+          level = '위험';
+        }
+      } else if (count151to200 > 0) {
+        level = '주의';
+      } else if (count201to500 > 0) {
+        level = '관심';
+      } else if (within20 > 0 || (dist >= 0 && dist <= 20)) {
+        // 20m 이내 엽사만 존재하는 기존 동작 유지
+        level = '주의';
+      } else if (dist > 500 || dist < 0) {
+        level = 'SAFE';
       }
 
       if (!mounted) return;
@@ -888,6 +930,14 @@ void _toggle() async {
   // 스캔(거리 계산)
   // ----------------------------------------------------------
   Future<void> _checkSafety() async {
+    // 10초 주기로 줄였기 때문에 이전 체크가 아직 끝나지 않았으면
+    // 다음 체크를 겹쳐 실행하지 않는다.
+    if (!_running || _safetyCheckInProgress) {
+      return;
+    }
+
+    _safetyCheckInProgress = true;
+
     try {
       if (Platform.isIOS) {
         final pos = await Geolocator.getCurrentPosition(
@@ -905,10 +955,12 @@ void _toggle() async {
       await _processSafety(_lastLat!, _lastLng!);
     } catch (e) {
       debugPrint('❌ safety check error: $e');
-    }
+    } finally {
+      _safetyCheckInProgress = false;
 
-    if (mounted) {
-      setState(() => _progress = 0.0);
+      if (mounted && _running) {
+        setState(() => _progress = 0.0);
+      }
     }
   }
 
@@ -951,44 +1003,105 @@ void _toggle() async {
 Future<void> _alertByDistance() async {
   if (!_running) return;
 
-  if (_distance < 0) return;
+  final count21to150 = max(0, _nearCount150 - _nearCount20);
+  final count151to200 = max(0, _nearCount200 - _nearCount150);
+  final count201to500 = max(0, _nearCount500 - _nearCount200);
 
   /*
-   * 20m 이내는 경보 없음.
-   * 화면 텍스트만 표시한다.
-   * 진동, 비프음, TTS 모두 실행하지 않는다.
+   * 경보 우선순위
+   * 3 = 21~150m : 가장 높은 위험
+   * 2 = 151~200m
+   * 1 = 201~500m
+   * 0 = 경보 없음
    */
-  if (_distance <= 20) {
-    debugPrint("ℹ️ 20m 이내 → 경보 없이 텍스트만 표시");
+  int alertPriority = 0;
+
+  if (count21to150 > 0) {
+    alertPriority = 3;
+  } else if (count151to200 > 0) {
+    alertPriority = 2;
+  } else if (count201to500 > 0) {
+    alertPriority = 1;
+  }
+
+  /*
+   * 경보 대상이 사라졌거나 20m 이내 엽사만 있는 경우
+   * 기존 정책대로 음성/비프/진동 경보는 하지 않는다.
+   *
+   * 이때 이전 경보 상태를 초기화해서,
+   * 이후 다시 위험구간 엽사가 나타나면 60초를 기다리지 않고 즉시 경보한다.
+   */
+  if (alertPriority == 0) {
+    _lastAlertAt = null;
+    _lastAlertPriority = 0;
+
+    if (_nearCount20 > 0 || (_distance >= 0 && _distance <= 20)) {
+      debugPrint("ℹ️ 20m 이내 엽사만 존재 → 경보 없이 텍스트만 표시");
+    }
+
     await _stopAllAlerts();
     return;
   }
 
-  /*
-   * 150m 이내에 20m 바깥 엽사가 있을 때만 강한 경보.
-   */
-  if (_nearCount150 > _nearCount20) {
+  final now = DateTime.now();
+
+  final bool firstAlert = _lastAlertAt == null;
+
+  // 이전 경보보다 위험도가 높아졌으면 60초를 기다리지 않고 즉시 재경보
+  final bool dangerIncreased =
+      _lastAlertPriority > 0 && alertPriority > _lastAlertPriority;
+
+  // 같은 위험도 또는 낮아진 위험도는 마지막 실제 경보 후 60초가 지나야 재알림
+  final bool intervalPassed = _lastAlertAt == null ||
+      now.difference(_lastAlertAt!) >= _sameAlertInterval;
+
+  if (!firstAlert && !dangerIncreased && !intervalPassed) {
+    final remain = _sameAlertInterval -
+        now.difference(_lastAlertAt!);
+
+    debugPrint(
+      '🔕 동일/하향 경보 대기 중: '
+      '${remain.inSeconds.clamp(0, 60)}초 후 재알림'
+    );
+
+    // 현재 위험도는 기억해 두되, 마지막 실제 경보 시각은 변경하지 않는다.
+    _lastAlertPriority = alertPriority;
+    return;
+  }
+
+  // 중복 타이머 호출이 들어와도 한 번만 울리도록 실제 경보 전에 기록
+  _lastAlertAt = now;
+  _lastAlertPriority = alertPriority;
+
+  if (alertPriority == 3) {
     await _vibrate(high: true);
     await _playBeep();
+
     await _speak(
-      "현재 백오십 미터 이내에 엽사가 ${toKoreanPersonCount(_nearCount150)} 있습니다. 즉시 주변을 경계하세요."
+      "현재 백오십 미터 이내에 엽사가 "
+      "${toKoreanPersonCount(_nearCount150)} 있습니다. "
+      "즉시 주변을 경계하세요."
     );
     return;
   }
 
-  if (_nearCount200 > 0) {
+  if (alertPriority == 2) {
     await _vibrate(high: true);
     await _playBeep();
+
     await _speak(
-      "현재 이백 미터 이내에 엽사가 ${toKoreanPersonCount(_nearCount200)} 있습니다."
+      "현재 이백 미터 이내에 엽사가 "
+      "${toKoreanPersonCount(_nearCount200)} 있습니다."
     );
     return;
   }
 
-  if (_nearCount500 > 0) {
+  if (alertPriority == 1) {
     await _vibrate(high: false);
+
     await _speak(
-      "현재 오백 미터 이내에 엽사가 ${toKoreanPersonCount(_nearCount500)} 있습니다."
+      "현재 오백 미터 이내에 엽사가 "
+      "${toKoreanPersonCount(_nearCount500)} 있습니다."
     );
     return;
   }
@@ -1029,54 +1142,71 @@ Future<void> _alertByDistance() async {
   // UI
   // ----------------------------------------------------------
 Color _levelColorByDistance() {
-  /*
-   * 20m 이내는 최우선.
-   * _nearCount500이 0으로 와도 황색 표시가 되도록 가장 먼저 처리한다.
-   */
-  if (_distance >= 0 && _distance <= 20) {
-    return Colors.orange.shade300;
-  }
+  final count21to150 = max(0, _nearCount150 - _nearCount20);
+  final count151to200 = max(0, _nearCount200 - _nearCount150);
+  final count201to500 = max(0, _nearCount500 - _nearCount200);
 
-  if (_nearCount20 > 0) {
-    return Colors.orange.shade300;
-  }
-
-  /*
-   * 아무도 없거나 거리값이 없으면 초록
-   */
-  if (_distance < 0 || _nearCount500 == 0) {
-    return Colors.green.shade400;
-  }
-
-  /*
-   * 150m 이내에 20m 바깥 엽사 존재
-   */
-  if ((_nearCount150 - _nearCount20) > 0) {
+  // 20m 안쪽 엽사가 있더라도 바깥쪽 위험 엽사를 우선 표시한다.
+  if (count21to150 > 0) {
     return Colors.red.shade400;
   }
 
-  /*
-   * 200m 이내에 150m 바깥 엽사 존재
-   */
-  if ((_nearCount200 - _nearCount150) > 0) {
+  if (count151to200 > 0) {
     return Colors.orange.shade400;
   }
 
-  /*
-   * 500m 이내
-   */
-  if (_nearCount500 > 0) {
+  if (count201to500 > 0) {
     return Colors.yellow.shade600;
+  }
+
+  // 20m 이내 엽사만 있는 경우 기존 표시 유지
+  if (_nearCount20 > 0 || (_distance >= 0 && _distance <= 20)) {
+    return Colors.orange.shade300;
   }
 
   return Colors.green.shade400;
 }
 
 Widget _buildRangeMessage() {
-  /*
-   * 20m 이내는 최우선.
-   * minDistance가 -1로 와도 within20 값이 있으면 텍스트 표시.
-   */
+  if (!_running) {
+    return const Text(
+      "주변에 활동 중인 수렵인을 확인하려면\n"
+      "스캔을 시작하세요.",
+      textAlign: TextAlign.center,
+      style: TextStyle(
+        fontSize: 15,
+        fontWeight: FontWeight.w600,
+      ),
+    );
+  }
+
+  final count21to150 = max(0, _nearCount150 - _nearCount20);
+  final count151to200 = max(0, _nearCount200 - _nearCount150);
+  final count201to500 = max(0, _nearCount500 - _nearCount200);
+
+  // 위험도가 높은 바깥 구간을 먼저 표시한다.
+  // 예: 20m 1명 + 80m 1명 → "150m 이내 엽사 2명"
+  if (count21to150 > 0) {
+    return Text(
+      "150m 이내 엽사 $_nearCount150명",
+      style: const TextStyle(fontSize: 15),
+    );
+  }
+
+  if (count151to200 > 0) {
+    return Text(
+      "200m 이내 엽사 $_nearCount200명",
+      style: const TextStyle(fontSize: 15),
+    );
+  }
+
+  if (count201to500 > 0) {
+    return Text(
+      "500m 이내 엽사 $_nearCount500명",
+      style: const TextStyle(fontSize: 15),
+    );
+  }
+
   if (_nearCount20 > 0 || (_distance >= 0 && _distance <= 20)) {
     return Text(
       "20m 이내 엽사 $_nearCount20명",
@@ -1084,50 +1214,46 @@ Widget _buildRangeMessage() {
     );
   }
 
-  if (_distance < 0) return const SizedBox();
-
-  if (_distance > 500) {
-    return const Text(
-      "안전구역 500m 내에 엽사 없음",
-      style: TextStyle(fontSize: 15),
-    );
-  }
-
-  if (_distance <= 150) {
-    return Text(
-      "150m 이내 엽사 $_nearCount150명",
-      style: const TextStyle(fontSize: 15),
-    );
-  }
-
-  if (_distance <= 200) {
-    return Text(
-      "200m 이내 엽사 $_nearCount200명",
-      style: const TextStyle(fontSize: 15),
-    );
-  }
-
-  return Text(
-    "500m 이내 엽사 $_nearCount500명",
-    style: const TextStyle(fontSize: 15),
+  return const Text(
+    "안전구역 500m 내에 엽사 없음",
+    style: TextStyle(fontSize: 15),
   );
 }
 
-  String _distanceText() {
-    if (_distance < 0) return "";
-    return "가장 근접한 엽사와 약 $_distance m";
+String _distanceText() {
+  if (!_running) return "";
+  if (_distance < 0) return "";
+
+  // 20m 안쪽과 바깥쪽 엽사가 동시에 있음을 사용자가 놓치지 않게 표시
+  if (_nearCount20 > 0 && _nearCount150 > _nearCount20) {
+    return "가장 근접한 엽사와 약 $_distance m 밖에도 엽사 감지";
   }
 
+  return "가장 근접한 엽사와 약 $_distance m";
+}
+
 String _cautionText() {
+  if (!_running) {
+    return "현재 스캔이 중지되어 있습니다.";
+  }
+
+  final count21to150 = max(0, _nearCount150 - _nearCount20);
+  final count151to200 = max(0, _nearCount200 - _nearCount150);
+  final count201to500 = max(0, _nearCount500 - _nearCount200);
+
+  if (count21to150 > 0) {
+    return "즉시 주변을 경계하세요";
+  }
+
+  if (count151to200 > 0 || count201to500 > 0) {
+    return "주의하세요";
+  }
+
   if (_nearCount20 > 0 || (_distance >= 0 && _distance <= 20)) {
     return "초근접거리에 엽사가 있습니다.\n주의하세요";
   }
 
-  if (_distance < 0) return "";
-  if (_distance > 500) return "현재는 안전한 상태입니다";
-  if (_distance <= 150) return "즉시 주변을 경계하세요";
-
-  return "주의하세요";
+  return "현재는 안전한 상태입니다";
 }
 
   // ----------------------------------------------------------
@@ -1155,16 +1281,80 @@ String _cautionText() {
     );
   }
 
-  Future<void> _openHunterMap() async {
-    if (_deviceId.isEmpty) {
-      await _initDeviceId();
-    }
+Future<void> _openHunterMap() async {
+  // 주변 스캔이 시작되지 않은 상태에서는 지도 진입 차단
+  if (!_running) {
+    if (!mounted) return;
 
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(
+              Icons.radar,
+              color: Colors.green,
+              size: 28,
+            ),
+            SizedBox(width: 10),
+            Text(
+              '주변 스캔 필요',
+              style: TextStyle(
+                fontSize: 19,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+        content: const Text(
+          '먼저 주변 스캔을 시작해 주세요.\n\n'
+          '스캔을 시작하면 주변 수렵인의 위치를 '
+          '지도에서 확인할 수 있습니다.',
+          style: TextStyle(
+            fontSize: 16,
+            height: 1.5,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text(
+              '확인',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    return;
+  }
+
+  // 스캔 중일 때만 지도 진입
+  if (_deviceId.isEmpty) {
+    await _initDeviceId();
+  }
+
+  if (!mounted) return;
+
+  await Navigator.of(context).push(
+    MaterialPageRoute(
+      builder: (_) => HunterMapPage(
+        deviceId: _deviceId,
+      ),
+    ),
+  );
+}
+
+  Future<void> _openConnectedRegions() async {
     if (!mounted) return;
 
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => HunterMapPage(deviceId: _deviceId),
+        builder: (_) => const ConnectedRegionsPage(),
       ),
     );
   }
@@ -1197,17 +1387,22 @@ String _cautionText() {
 
     final caution = _cautionText();
 
-    // 🔹 원 기본색 (거리 기준)
-    final baseColor = _levelColorByDistance();
+    // 스캔 시작 전에는 SAFE로 보이지 않도록 별도 상태 표시
+    final String displayLevel = _running ? _level : '스캔 중지 중';
+
+    // 🔹 원 기본색
+    // 스캔 중지 상태에서는 초록색(SAFE) 대신 회색으로 표시한다.
+    final baseColor =
+        _running ? _levelColorByDistance() : Colors.grey.shade500;
 
     // 🔴 "위험"일 때는 깜빡이는 색 적용
     final Color circleColor;
-    if (_level == '위험') {
+    if (_running && _level == '위험') {
       circleColor = _isDangerBlinkOn
-          ? baseColor                  // 켜진 상태 (진한 빨강 계열)
-          : baseColor.withOpacity(0.2); // 꺼진 상태 (옅은 색)
+          ? baseColor
+          : baseColor.withOpacity(0.2);
     } else {
-      circleColor = baseColor;          // 위험 아니면 그냥 기본색
+      circleColor = baseColor;
     }
 
     return Scaffold(
@@ -1268,9 +1463,10 @@ String _cautionText() {
               ),
               alignment: Alignment.center,
               child: Text(
-                _level,
-                style: const TextStyle(
-                  fontSize: 38,
+                displayLevel,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: _running ? 38 : 27,
                   fontWeight: FontWeight.bold,
                   color: Colors.white,
                 ),
@@ -1367,7 +1563,7 @@ String _cautionText() {
         },
       ),
 
-      // 🔻 하단 푸터: 제작사 / 고객센터 / 개인정보처리방침
+      // 🔻 하단 푸터: 회사정보 / 고객센터 / 연동지자체 / 개인정보
       bottomNavigationBar: SafeArea(
         child: Container(
           decoration: BoxDecoration(
@@ -1428,22 +1624,21 @@ String _cautionText() {
                 ),
               ),
 
-              // 권한설정 (Android)
-              if (Platform.isAndroid)
-                Expanded(
-                  child: TextButton(
-                    onPressed: _openRequiredPermissionPage,
+              // 연동지자체
+              Expanded(
+                child: TextButton(
+                  onPressed: _openConnectedRegions,
                   style: TextButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 10),
                   ),
-                  child: Column(
+                  child: const Column(
                     mainAxisSize: MainAxisSize.min,
-                    children: const [
-                      Icon(Icons.admin_panel_settings_outlined,
-                          size: 18, color: Colors.grey),
+                    children: [
+                      Icon(Icons.hub_outlined, size: 18, color: Colors.grey),
                       SizedBox(height: 2),
                       Text(
-                        '권한설정',
+                        '연동지자체',
+                        maxLines: 1,
                         style: TextStyle(
                           fontSize: 12,
                           color: Colors.grey,
