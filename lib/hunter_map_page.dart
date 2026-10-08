@@ -1,13 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geomag/geomag.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:sensors_plus/sensors_plus.dart';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 
@@ -39,7 +37,6 @@ class _HunterMapPageState extends State<HunterMapPage> {
   Timer? _timer;
   Timer? _recenterTimer;
   StreamSubscription<CompassEvent>? _compassSub;
-  StreamSubscription<AccelerometerEvent>? _accelerometerSub;
 
   LatLng? _myPosition;
   List<_HunterPoint> _hunters = const [];
@@ -68,9 +65,6 @@ class _HunterMapPageState extends State<HunterMapPage> {
   final GeoMag _geoMag = GeoMag();
   double _magneticDeclination = 0.0;
 
-  // 1.0에 가까우면 폰을 눕힌 상태, 0.0에 가까우면 세운 상태.
-  // 눕힌 상태는 폰 상단 방향, 세운 상태는 후면 카메라 방향을 사용한다.
-  double _deviceFlatness = 1.0;
   double? _declinationLat;
   double? _declinationLng;
 
@@ -79,7 +73,6 @@ class _HunterMapPageState extends State<HunterMapPage> {
     super.initState();
 
     _startCompass();
-    _startTiltSensor();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _startRealtimeMap();
@@ -91,7 +84,6 @@ class _HunterMapPageState extends State<HunterMapPage> {
     _timer?.cancel();
     _recenterTimer?.cancel();
     _compassSub?.cancel();
-    _accelerometerSub?.cancel();
     super.dispose();
   }
 
@@ -225,30 +217,6 @@ class _HunterMapPageState extends State<HunterMapPage> {
     _applyMapHeading();
   }
 
-  void _startTiltSensor() {
-    _accelerometerSub =
-        accelerometerEventStream(
-          samplingPeriod: SensorInterval.gameInterval,
-        ).listen((event) {
-          final magnitude = math.sqrt(
-            event.x * event.x +
-                event.y * event.y +
-                event.z * event.z,
-          );
-
-          if (magnitude < 0.1) return;
-
-          // 화면 법선(Z축)이 중력축과 얼마나 나란한지를 본다.
-          // 1.0 = 거의 수평, 0.0 = 거의 수직.
-          final flatness =
-              (event.z.abs() / magnitude).clamp(0.0, 1.0);
-
-          // 센서 떨림을 줄이기 위한 간단한 저역통과 필터.
-          _deviceFlatness =
-              (_deviceFlatness * 0.82) + (flatness * 0.18);
-        });
-  }
-
   double _blendAngles(
     double a,
     double b,
@@ -259,51 +227,16 @@ class _HunterMapPageState extends State<HunterMapPage> {
     return (a + delta * clamped + 360.0) % 360.0;
   }
 
-  double _tiltAwareMagneticHeading(CompassEvent event) {
-    final topHeading = event.heading;
-
-    if (topHeading == null || topHeading.isNaN) {
-      return double.nan;
-    }
-
-    final cameraHeading = event.headingForCameraMode;
-
-    if (cameraHeading == null || cameraHeading.isNaN) {
-      // 카메라 방향값을 못 받는 기기에서는 기존 상단 방향값으로 fallback.
-      return topHeading;
-    }
-
-    /*
-     * 폰이 눕혀져 있을 때:
-     *   topHeading = 폰 상단이 향하는 방향이 가장 정확하다.
-     *
-     * 폰을 세웠을 때:
-     *   폰 상단축은 하늘을 향하기 때문에 수평방향 기준으로 부적절하다.
-     *   이때는 후면 카메라가 바라보는 방향(headingForCameraMode)을 사용한다.
-     *
-     * 중간 기울기에서는 두 값을 원형 각도로 부드럽게 보간한다.
-     */
-    const uprightFlatness = 0.30;
-    const flatFlatness = 0.72;
-
-    final cameraWeight =
-        ((flatFlatness - _deviceFlatness) /
-                (flatFlatness - uprightFlatness))
-            .clamp(0.0, 1.0);
-
-    return _blendAngles(
-      topHeading,
-      cameraHeading,
-      cameraWeight,
-    );
-  }
 
   void _startCompass() {
     _compassSub = FlutterCompass.events?.listen((event) {
-      final magneticHeading = _tiltAwareMagneticHeading(event);
-      if (magneticHeading.isNaN) return;
+      final magneticHeading = event.heading;
 
-      // 기울기 보정이 끝난 자기북 방향에 자기편차를 더해
+      if (magneticHeading == null || magneticHeading.isNaN) {
+        return;
+      }
+
+      // 자기북 방향에 자기편차를 더해
       // 진북 기준으로 변환한다.
       final trueBearing =
           magneticHeading + _magneticDeclination;
