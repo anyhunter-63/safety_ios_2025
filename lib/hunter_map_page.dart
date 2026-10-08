@@ -1,11 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:geomag/geomag.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
@@ -62,12 +61,10 @@ class _HunterMapPageState extends State<HunterMapPage> {
   double _movementHeading = 0.0;
   double _mapHeading = 0.0;
 
-  // 정지 상태 Compass의 자기북 -> 진북 보정.
-  final GeoMag _geoMag = GeoMag();
-  double _magneticDeclination = 0.0;
-
-  double? _declinationLat;
-  double? _declinationLng;
+  // 지도 좌측 상단 나침반 표시용.
+  // 지도 전체를 다시 빌드하지 않고 나침반만 회전시킨다.
+  final ValueNotifier<double> _compassDisplayHeading =
+      ValueNotifier<double>(0.0);
 
   @override
   void initState() {
@@ -85,6 +82,7 @@ class _HunterMapPageState extends State<HunterMapPage> {
     _timer?.cancel();
     _recenterTimer?.cancel();
     _compassSub?.cancel();
+    _compassDisplayHeading.dispose();
     super.dispose();
   }
 
@@ -126,43 +124,6 @@ class _HunterMapPageState extends State<HunterMapPage> {
     }
 
     return true;
-  }
-
-  void _updateMagneticDeclination(Position pos) {
-    // 자기편차는 짧은 거리에서는 거의 변하지 않으므로
-    // 최초 1회 또는 1km 이상 이동했을 때만 다시 계산한다.
-    if (_declinationLat != null && _declinationLng != null) {
-      final moved = Geolocator.distanceBetween(
-        _declinationLat!,
-        _declinationLng!,
-        pos.latitude,
-        pos.longitude,
-      );
-
-      if (moved < 1000.0) {
-        return;
-      }
-    }
-
-    try {
-      // geomag의 고도 단위는 feet.
-      final heightFeet =
-          pos.altitude.isFinite ? pos.altitude * 3.280839895 : 0.0;
-
-      final result = _geoMag.calculate(
-        pos.latitude,
-        pos.longitude,
-        heightFeet,
-        DateTime.now(),
-      );
-
-      _magneticDeclination = result.dec;
-      _declinationLat = pos.latitude;
-      _declinationLng = pos.longitude;
-    } catch (e) {
-      debugPrint('⚠️ magnetic declination update failed: $e');
-      _magneticDeclination = 0.0;
-    }
   }
 
   double _normalizeMapHeading(double bearingDegrees) {
@@ -238,12 +199,10 @@ class _HunterMapPageState extends State<HunterMapPage> {
         return;
       }
 
-      // flutter_compass:
-      // - iOS의 event.heading은 이미 진북 기준이다.
-      // - Android는 자기북 기준이므로 자기편차를 더한다.
-      final trueBearing = Platform.isIOS
-          ? magneticHeading
-          : magneticHeading + _magneticDeclination;
+      // 실제 단말 테스트 결과 flutter_compass의 event.heading을
+      // 그대로 사용할 때 지도의 정북 방향이 가장 정확했다.
+      // 별도의 자기편차 보정은 적용하지 않는다.
+      final trueBearing = magneticHeading;
       final next = _normalizeMapHeading(trueBearing);
 
       // 정지상태의 나침반 미세 떨림 억제.
@@ -262,6 +221,9 @@ class _HunterMapPageState extends State<HunterMapPage> {
   }
 
   void _applyMapHeading() {
+    // 지도 회전값과 좌측 상단 나침반을 항상 같은 값으로 유지한다.
+    _compassDisplayHeading.value = _mapHeading;
+
     if (!_mapReady) return;
 
     try {
@@ -328,7 +290,6 @@ class _HunterMapPageState extends State<HunterMapPage> {
 
       final myPos = LatLng(pos.latitude, pos.longitude);
 
-      _updateMagneticDeclination(pos);
       _updateMovementHeading(pos);
 
       final uri = Uri.parse(
@@ -740,6 +701,54 @@ class _HunterMapPageState extends State<HunterMapPage> {
                       ),
                     ),
                   ),
+                // 지도 회전에 맞춰 북쪽을 가리키는 나침반.
+                // 배경은 고정하고 N/화살표만 회전한다.
+                if (myPosition != null)
+                  Positioned(
+                    left: 12,
+                    top: 12,
+                    child: IgnorePointer(
+                      child: Material(
+                        elevation: 4,
+                        shape: const CircleBorder(),
+                        color: Colors.white.withOpacity(0.96),
+                        child: SizedBox(
+                          width: 54,
+                          height: 54,
+                          child: ValueListenableBuilder<double>(
+                            valueListenable: _compassDisplayHeading,
+                            builder: (context, heading, _) {
+                              return Center(
+                                child: Transform.rotate(
+                                  angle: heading * math.pi / 180.0,
+                                  child: const Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        'N',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w900,
+                                          color: Colors.red,
+                                          height: 1.0,
+                                        ),
+                                      ),
+                                      Icon(
+                                        Icons.navigation,
+                                        size: 25,
+                                        color: Colors.red,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
                 if (myPosition != null)
                   Positioned(
                     right: 12,
