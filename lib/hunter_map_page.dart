@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_compass/flutter_compass.dart';
@@ -167,7 +168,8 @@ class _HunterMapPageState extends State<HunterMapPage> {
   double _normalizeMapHeading(double bearingDegrees) {
     if (!bearingDegrees.isFinite) return _mapHeading;
 
-    // 진행방향이 화면 위쪽을 향하도록 지도는 반대 방향으로 회전.
+    // flutter_map의 rotate()는 '지도 자체'를 회전시킨다.
+    // 사용자의 실제 방위가 화면 위쪽을 향하게 하려면 지도는 반대 방향으로 회전해야 한다.
     return (((-bearingDegrees) % 360) + 360) % 360;
   }
 
@@ -236,10 +238,12 @@ class _HunterMapPageState extends State<HunterMapPage> {
         return;
       }
 
-      // 자기북 방향에 자기편차를 더해
-      // 진북 기준으로 변환한다.
-      final trueBearing =
-          magneticHeading + _magneticDeclination;
+      // flutter_compass:
+      // - iOS의 event.heading은 이미 진북 기준이다.
+      // - Android는 자기북 기준이므로 자기편차를 더한다.
+      final trueBearing = Platform.isIOS
+          ? magneticHeading
+          : magneticHeading + _magneticDeclination;
       final next = _normalizeMapHeading(trueBearing);
 
       // 정지상태의 나침반 미세 떨림 억제.
