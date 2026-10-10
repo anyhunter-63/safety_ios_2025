@@ -5,7 +5,6 @@ import AVFAudio
 @UIApplicationMain
 @objc class AppDelegate: FlutterAppDelegate {
 
-  // 🔹 안전지키미에서 사용하는 네이티브 서비스 채널 (Android와 동일 이름)
   private let nativeServiceChannelName = "com.civilsafety.app/native_service"
 
   override func application(
@@ -53,7 +52,6 @@ import AVFAudio
   }
 
   // MARK: - Audio Session (백그라운드 유지 + TTS 최적화)
-
   private func configureAudioSession() {
     do {
       let session = AVAudioSession.sharedInstance()
