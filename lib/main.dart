@@ -1388,7 +1388,7 @@ Future<void> _openHunterMap() async {
     final caution = _cautionText();
 
     // 스캔 시작 전에는 SAFE로 보이지 않도록 별도 상태 표시
-    final String displayLevel = _running ? _level : '스캔 중지 중';
+    final String displayLevel = _running ? _level : '스캔 중지';
 
     // 🔹 원 기본색
     // 스캔 중지 상태에서는 초록색(SAFE) 대신 회색으로 표시한다.
@@ -1472,26 +1472,157 @@ Future<void> _openHunterMap() async {
                 ),
               ),
             ),
-            const SizedBox(height: 30),
-            _buildRangeMessage(),
-            const SizedBox(height: 8),
-            if (_running) const ScanProgressBar(),
-            Text(
-              _distanceText(),
-              style: const TextStyle(fontSize: 15),
-            ),
-            const SizedBox(height: 8),
-            if (caution.isNotEmpty)
-              Text(
-                caution,
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
+            const SizedBox(height: 24),
+
+            // 주변 상태 정보 카드
+            // Android / iOS 공용 UI이며 스캔·경보 로직은 변경하지 않는다.
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.symmetric(horizontal: 4),
+              padding: const EdgeInsets.fromLTRB(18, 16, 18, 15),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: Colors.grey.shade200,
+                  width: 1,
                 ),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x10000000),
+                    blurRadius: 16,
+                    offset: Offset(0, 6),
+                  ),
+                ],
               ),
-            const SizedBox(height: 16),
-            Text("스캔 시각: $last"),
-            const SizedBox(height: 28),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 34,
+                        height: 34,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: baseColor.withOpacity(0.14),
+                        ),
+                        child: Icon(
+                          _running
+                              ? Icons.radar_rounded
+                              : Icons.pause_circle_outline_rounded,
+                          size: 20,
+                          color: baseColor,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Text(
+                          '주변 안전 상태',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF263238),
+                          ),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _running
+                              ? Colors.green.shade50
+                              : Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          _running ? '스캔 중' : '스캔 중지',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            color: _running
+                                ? Colors.green.shade700
+                                : Colors.grey.shade600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  if (caution.isNotEmpty)
+                    Text(
+                      caution,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 19,
+                        height: 1.35,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF202124),
+                      ),
+                    ),
+
+                  const SizedBox(height: 9),
+
+                  DefaultTextStyle.merge(
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      height: 1.35,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF5F6368),
+                    ),
+                    child: _buildRangeMessage(),
+                  ),
+
+                  if (_running) ...[
+                    const SizedBox(height: 2),
+                    const ScanProgressBar(),
+                  ],
+
+                  if (_distanceText().isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF7F9FA),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.near_me_outlined,
+                            size: 17,
+                            color: Colors.grey.shade600,
+                          ),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              _distanceText(),
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF3C4043),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 24),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8),
               child: Row(
